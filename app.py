@@ -1,15 +1,27 @@
 #!/usr/bin/env python3
+"""
+GitHub Stats - Analyze your real contribution history.
+
+Features:
+- SQLite-backed storage with rich query support
+- GitHub user avatars and profile data
+- Top repos by commits, lines added/deleted
+- Interactive exploration with filtering
+- Static export for GitHub Pages
+"""
 
 import os
 import json
+import sqlite3
 from datetime import datetime, timedelta, date
 from pathlib import Path
 from dotenv import load_dotenv
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, g
 import requests
 import pandas as pd
 import numpy as np
 import plotly.graph_objs as go
+import plotly.express as px
 from dateutil.relativedelta import relativedelta
 from collections import defaultdict
 import time
@@ -18,268 +30,617 @@ load_dotenv()
 
 app = Flask(__name__)
 
+# Configuration
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
 GITHUB_USERS = [user.strip() for user in os.getenv('GITHUB_USERS', 'zeekay').split(',')]
 DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
-PORT = int(os.getenv('PORT', '5000'))
+PORT = int(os.getenv('PORT', '5001'))
 START_DATE = datetime.strptime(os.getenv('START_DATE', '2021-01-01'), '%Y-%m-%d').date()
-CACHE_DIR = Path(os.getenv('CACHE_DIR', './cache'))
+DB_PATH = Path(os.getenv('DB_PATH', './cache/stats.db'))
+REQUEST_DELAY = float(os.getenv('REQUEST_DELAY', '0.1'))
 
+# API Headers
 HEADERS = {'Authorization': f'bearer {GITHUB_TOKEN}', 'Accept': 'application/vnd.github.v3+json'}
 REST_HEADERS = {'Authorization': f'token {GITHUB_TOKEN}', 'Accept': 'application/vnd.github.v3+json'}
 SEARCH_HEADERS = {'Authorization': f'token {GITHUB_TOKEN}', 'Accept': 'application/vnd.github.cloak-preview'}
-REQUEST_DELAY = 0.1
 
 # Ensure cache directory exists
-CACHE_DIR.mkdir(exist_ok=True)
+DB_PATH.parent.mkdir(exist_ok=True)
 
 
-class CommitCache:
-    """Persistent cache for commits"""
+class StatsDB:
+    """SQLite database for GitHub stats with rich query support."""
     
-    def __init__(self, username):
-        self.username = username
-        self.cache_file = CACHE_DIR / f"{username}_commits.json"
-        self.meta_file = CACHE_DIR / f"{username}_meta.json"
-        self.commits = {}  # sha -> commit data
-        self.meta = {'last_fetch': None, 'months_fetched': []}
-        self._load()
+    def __init__(self, db_path: Path = DB_PATH):
+        self.db_path = db_path
+        self._init_db()
     
-    def _load(self):
-        if self.cache_file.exists():
-            try:
-                with open(self.cache_file) as f:
-                    self.commits = json.load(f)
-                print(f"  Loaded {len(self.commits)} cached commits for {self.username}")
-            except:
-                self.commits = {}
+    def _get_conn(self):
+        """Get thread-local connection."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+    
+    def _init_db(self):
+        """Initialize database schema."""
+        conn = self._get_conn()
+        conn.executescript('''
+            -- Users table with profile info
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                avatar_url TEXT,
+                name TEXT,
+                bio TEXT,
+                company TEXT,
+                location TEXT,
+                blog TEXT,
+                followers INTEGER DEFAULT 0,
+                following INTEGER DEFAULT 0,
+                public_repos INTEGER DEFAULT 0,
+                created_at TEXT,
+                updated_at TEXT
+            );
+            
+            -- Commits table
+            CREATE TABLE IF NOT EXISTS commits (
+                sha TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                date TEXT NOT NULL,
+                repo TEXT,
+                message TEXT,
+                url TEXT,
+                additions INTEGER,
+                deletions INTEGER,
+                fetched_at TEXT,
+                FOREIGN KEY (username) REFERENCES users(username)
+            );
+            
+            -- Repos summary table (aggregated)
+            CREATE TABLE IF NOT EXISTS repos (
+                repo TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                commit_count INTEGER DEFAULT 0,
+                additions INTEGER DEFAULT 0,
+                deletions INTEGER DEFAULT 0,
+                first_commit TEXT,
+                last_commit TEXT,
+                FOREIGN KEY (username) REFERENCES users(username)
+            );
+            
+            -- Fetch metadata
+            CREATE TABLE IF NOT EXISTS fetch_meta (
+                username TEXT,
+                year_month TEXT,
+                fetched_at TEXT,
+                PRIMARY KEY (username, year_month)
+            );
+            
+            -- Indexes for fast queries
+            CREATE INDEX IF NOT EXISTS idx_commits_user_date ON commits(username, date);
+            CREATE INDEX IF NOT EXISTS idx_commits_repo ON commits(repo);
+            CREATE INDEX IF NOT EXISTS idx_commits_date ON commits(date);
+            CREATE INDEX IF NOT EXISTS idx_repos_username ON repos(username);
+        ''')
+        conn.commit()
+        conn.close()
+    
+    def save_user(self, user_data: dict):
+        """Save user profile data."""
+        conn = self._get_conn()
+        conn.execute('''
+            INSERT OR REPLACE INTO users 
+            (username, avatar_url, name, bio, company, location, blog, 
+             followers, following, public_repos, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            user_data.get('login'),
+            user_data.get('avatar_url'),
+            user_data.get('name'),
+            user_data.get('bio'),
+            user_data.get('company'),
+            user_data.get('location'),
+            user_data.get('blog'),
+            user_data.get('followers', 0),
+            user_data.get('following', 0),
+            user_data.get('public_repos', 0),
+            user_data.get('created_at'),
+            datetime.now().isoformat()
+        ))
+        conn.commit()
+        conn.close()
+    
+    def get_user(self, username: str) -> dict:
+        """Get user profile data."""
+        conn = self._get_conn()
+        row = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+        conn.close()
+        return dict(row) if row else None
+    
+    def save_commits(self, commits: list):
+        """Save commits in batch."""
+        if not commits:
+            return 0
         
-        if self.meta_file.exists():
+        conn = self._get_conn()
+        saved = 0
+        for commit in commits:
             try:
-                with open(self.meta_file) as f:
-                    self.meta = json.load(f)
+                conn.execute('''
+                    INSERT OR IGNORE INTO commits 
+                    (sha, username, date, repo, message, url, additions, deletions, fetched_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    commit.get('sha'),
+                    commit.get('username'),
+                    commit.get('date'),
+                    commit.get('repo'),
+                    commit.get('message'),
+                    commit.get('url'),
+                    commit.get('additions'),
+                    commit.get('deletions'),
+                    datetime.now().isoformat()
+                ))
+                saved += conn.total_changes
             except:
-                self.meta = {'last_fetch': None, 'months_fetched': []}
+                pass
+        conn.commit()
+        conn.close()
+        return saved
     
-    def save(self):
-        with open(self.cache_file, 'w') as f:
-            json.dump(self.commits, f)
-        with open(self.meta_file, 'w') as f:
-            json.dump(self.meta, f)
-        print(f"  Saved {len(self.commits)} commits to cache")
+    def update_commit_loc(self, sha: str, additions: int, deletions: int):
+        """Update LOC data for a commit."""
+        conn = self._get_conn()
+        conn.execute('''
+            UPDATE commits SET additions = ?, deletions = ? WHERE sha = ?
+        ''', (additions, deletions, sha))
+        conn.commit()
+        conn.close()
     
-    def add_commits(self, commits_list):
-        for commit in commits_list:
-            sha = commit.get('sha')
-            if sha and sha not in self.commits:
-                self.commits[sha] = commit
+    def get_commits_needing_loc(self, username: str, limit: int = 500) -> list:
+        """Get commits that need LOC data."""
+        conn = self._get_conn()
+        rows = conn.execute('''
+            SELECT sha, url FROM commits 
+            WHERE username = ? AND additions IS NULL 
+            LIMIT ?
+        ''', (username, limit)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
     
-    def mark_month_fetched(self, year, month):
-        key = f"{year}-{month:02d}"
-        if key not in self.meta['months_fetched']:
-            self.meta['months_fetched'].append(key)
-        self.meta['last_fetch'] = datetime.now().isoformat()
+    def mark_month_fetched(self, username: str, year: int, month: int):
+        """Mark a month as fetched."""
+        conn = self._get_conn()
+        conn.execute('''
+            INSERT OR REPLACE INTO fetch_meta (username, year_month, fetched_at)
+            VALUES (?, ?, ?)
+        ''', (username, f'{year}-{month:02d}', datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
     
-    def is_month_fetched(self, year, month):
-        key = f"{year}-{month:02d}"
-        return key in self.meta['months_fetched']
+    def is_month_fetched(self, username: str, year: int, month: int) -> bool:
+        """Check if month is fetched."""
+        conn = self._get_conn()
+        row = conn.execute('''
+            SELECT 1 FROM fetch_meta WHERE username = ? AND year_month = ?
+        ''', (username, f'{year}-{month:02d}')).fetchone()
+        conn.close()
+        return row is not None
     
-    def get_all_commits(self):
-        return list(self.commits.values())
+    def get_stats(self, username: str) -> dict:
+        """Get comprehensive stats for a user - the god-tier metrics."""
+        conn = self._get_conn()
+
+        # Basic counts
+        total = conn.execute('SELECT COUNT(*) FROM commits WHERE username = ?', (username,)).fetchone()[0]
+        with_loc = conn.execute('SELECT COUNT(*) FROM commits WHERE username = ? AND additions IS NOT NULL', (username,)).fetchone()[0]
+
+        # Totals
+        totals = conn.execute('''
+            SELECT
+                COALESCE(SUM(additions), 0) as total_additions,
+                COALESCE(SUM(deletions), 0) as total_deletions
+            FROM commits WHERE username = ?
+        ''', (username,)).fetchone()
+
+        # Date range
+        dates = conn.execute('''
+            SELECT MIN(date) as first, MAX(date) as last
+            FROM commits WHERE username = ?
+        ''', (username,)).fetchone()
+
+        # Active days (unique days with commits)
+        active_days = conn.execute('''
+            SELECT COUNT(DISTINCT date) FROM commits WHERE username = ?
+        ''', (username,)).fetchone()[0]
+
+        # Unique repos
+        unique_repos = conn.execute('''
+            SELECT COUNT(DISTINCT repo) FROM commits WHERE username = ?
+        ''', (username,)).fetchone()[0]
+
+        # Max commits in a day
+        max_day = conn.execute('''
+            SELECT date, COUNT(*) as cnt FROM commits
+            WHERE username = ? GROUP BY date ORDER BY cnt DESC LIMIT 1
+        ''', (username,)).fetchone()
+
+        # Day of week analysis
+        dow_stats = conn.execute('''
+            SELECT
+                CASE CAST(strftime('%w', date) AS INTEGER)
+                    WHEN 0 THEN 'Sunday'
+                    WHEN 1 THEN 'Monday'
+                    WHEN 2 THEN 'Tuesday'
+                    WHEN 3 THEN 'Wednesday'
+                    WHEN 4 THEN 'Thursday'
+                    WHEN 5 THEN 'Friday'
+                    WHEN 6 THEN 'Saturday'
+                END as day,
+                COUNT(*) as commits
+            FROM commits WHERE username = ?
+            GROUP BY strftime('%w', date) ORDER BY commits DESC
+        ''', (username,)).fetchall()
+
+        # Yearly breakdown
+        yearly = {}
+        yearly_rows = conn.execute('''
+            SELECT
+                strftime('%Y', date) as year,
+                COUNT(*) as commits,
+                COALESCE(SUM(additions), 0) as additions,
+                COALESCE(SUM(deletions), 0) as deletions,
+                COUNT(DISTINCT date) as days_active
+            FROM commits WHERE username = ?
+            GROUP BY strftime('%Y', date) ORDER BY year
+        ''', (username,)).fetchall()
+        for row in yearly_rows:
+            yearly[row['year']] = {
+                'commits': row['commits'],
+                'additions': row['additions'],
+                'deletions': row['deletions'],
+                'net_loc': row['additions'] - row['deletions'],
+                'days_active': row['days_active']
+            }
+
+        # Streak calculation
+        all_dates = [r[0] for r in conn.execute(
+            'SELECT DISTINCT date FROM commits WHERE username = ? ORDER BY date', (username,)
+        ).fetchall()]
+
+        current_streak = 0
+        longest_streak = 0
+        if all_dates:
+            today = datetime.now().strftime('%Y-%m-%d')
+            yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+            # Calculate current streak
+            if all_dates and (all_dates[-1] == today or all_dates[-1] == yesterday):
+                current_streak = 1
+                for i in range(len(all_dates) - 2, -1, -1):
+                    d1 = datetime.strptime(all_dates[i], '%Y-%m-%d')
+                    d2 = datetime.strptime(all_dates[i + 1], '%Y-%m-%d')
+                    if (d2 - d1).days == 1:
+                        current_streak += 1
+                    else:
+                        break
+
+            # Calculate longest streak
+            if all_dates:
+                streak = 1
+                for i in range(1, len(all_dates)):
+                    d1 = datetime.strptime(all_dates[i - 1], '%Y-%m-%d')
+                    d2 = datetime.strptime(all_dates[i], '%Y-%m-%d')
+                    if (d2 - d1).days == 1:
+                        streak += 1
+                    else:
+                        longest_streak = max(longest_streak, streak)
+                        streak = 1
+                longest_streak = max(longest_streak, streak)
+
+        # Average commit size
+        avg_loc = conn.execute('''
+            SELECT AVG(additions + deletions) FROM commits
+            WHERE username = ? AND additions IS NOT NULL
+        ''', (username,)).fetchone()[0] or 0
+
+        conn.close()
+
+        # Calculate derived stats
+        first_date = datetime.strptime(dates['first'], '%Y-%m-%d') if dates['first'] else datetime.now()
+        last_date = datetime.strptime(dates['last'], '%Y-%m-%d') if dates['last'] else datetime.now()
+        total_days = (last_date - first_date).days + 1 if dates['first'] else 0
+        years_coding = (datetime.now() - first_date).days / 365.25 if dates['first'] else 0
+
+        return {
+            'total_commits': total,
+            'with_loc': with_loc,
+            'missing_loc': total - with_loc,
+            'total_additions': totals['total_additions'],
+            'total_deletions': totals['total_deletions'],
+            'net_loc_change': totals['total_additions'] - totals['total_deletions'],
+            'first_commit': dates['first'],
+            'last_commit': dates['last'],
+            'total_days': total_days,
+            'active_days': active_days,
+            'unique_repos': unique_repos,
+            'years_coding': round(years_coding, 1),
+            'average_commits': round(total / max(active_days, 1), 1),
+            'average_loc_per_commit': round(avg_loc, 0),
+            'maximum_commits': max_day['cnt'] if max_day else 0,
+            'max_commit_date': max_day['date'] if max_day else None,
+            'current_streak': current_streak,
+            'longest_streak': longest_streak,
+            'most_productive_day': dow_stats[0]['day'] if dow_stats else None,
+            'day_of_week_stats': {r['day']: r['commits'] for r in dow_stats},
+            'yearly': yearly,
+            # Calculated metrics for display
+            'last_7d_commits': 0,  # Will calculate below
+            'last_30d_commits': 0,
+            'additions_30d_change': 0,
+            'deletions_30d_change': 0,
+            'growth_rate': 0
+        }
+    
+    def get_daily_stats(self, username: str, since: str = None) -> list:
+        """Get daily commit stats."""
+        conn = self._get_conn()
+        query = '''
+            SELECT 
+                date,
+                COUNT(*) as commits,
+                COALESCE(SUM(additions), 0) as additions,
+                COALESCE(SUM(deletions), 0) as deletions,
+                COUNT(DISTINCT repo) as repos
+            FROM commits 
+            WHERE username = ?
+        '''
+        params = [username]
+        if since:
+            query += ' AND date >= ?'
+            params.append(since)
+        query += ' GROUP BY date ORDER BY date'
+        
+        rows = conn.execute(query, params).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    
+    def get_yearly_stats(self, username: str) -> list:
+        """Get yearly aggregated stats."""
+        conn = self._get_conn()
+        rows = conn.execute('''
+            SELECT 
+                strftime('%Y', date) as year,
+                COUNT(*) as commits,
+                COALESCE(SUM(additions), 0) as additions,
+                COALESCE(SUM(deletions), 0) as deletions,
+                COUNT(DISTINCT repo) as repos,
+                COUNT(DISTINCT date) as days_active
+            FROM commits 
+            WHERE username = ?
+            GROUP BY year
+            ORDER BY year DESC
+        ''', (username,)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    
+    def get_top_repos(self, username: str, limit: int = 20, order_by: str = 'commits') -> list:
+        """Get top repositories by commits or LOC."""
+        conn = self._get_conn()
+        order_col = 'commits' if order_by == 'commits' else 'additions'
+        rows = conn.execute(f'''
+            SELECT 
+                repo,
+                COUNT(*) as commits,
+                COALESCE(SUM(additions), 0) as additions,
+                COALESCE(SUM(deletions), 0) as deletions,
+                MIN(date) as first_commit,
+                MAX(date) as last_commit
+            FROM commits 
+            WHERE username = ? AND repo IS NOT NULL AND repo != ''
+            GROUP BY repo
+            ORDER BY {order_col} DESC
+            LIMIT ?
+        ''', (username, limit)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    
+    def get_monthly_stats(self, username: str) -> list:
+        """Get monthly aggregated stats for heatmap."""
+        conn = self._get_conn()
+        rows = conn.execute('''
+            SELECT 
+                strftime('%Y', date) as year,
+                strftime('%m', date) as month,
+                COUNT(*) as commits,
+                COALESCE(SUM(additions), 0) as additions,
+                COALESCE(SUM(deletions), 0) as deletions
+            FROM commits 
+            WHERE username = ?
+            GROUP BY year, month
+            ORDER BY year, month
+        ''', (username,)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    
+    def get_recent_commits(self, username: str, limit: int = 50) -> list:
+        """Get recent commits."""
+        conn = self._get_conn()
+        rows = conn.execute('''
+            SELECT sha, date, repo, message, additions, deletions
+            FROM commits 
+            WHERE username = ?
+            ORDER BY date DESC
+            LIMIT ?
+        ''', (username, limit)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    
+    def search_commits(self, username: str, query: str, limit: int = 100) -> list:
+        """Search commits by message or repo."""
+        conn = self._get_conn()
+        rows = conn.execute('''
+            SELECT sha, date, repo, message, additions, deletions
+            FROM commits 
+            WHERE username = ? AND (message LIKE ? OR repo LIKE ?)
+            ORDER BY date DESC
+            LIMIT ?
+        ''', (username, f'%{query}%', f'%{query}%', limit)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
 
 
-class GitHubContributionAnalyzer:
-    def __init__(self):
-        self.caches = {}
-
-    def _get_cache(self, username):
-        if username not in self.caches:
-            self.caches[username] = CommitCache(username)
-        return self.caches[username]
-
-    def _search_commits_for_range(self, username, start_date, end_date):
-        """Search for commits by author in a date range"""
+class GitHubAPI:
+    """GitHub API client."""
+    
+    @staticmethod
+    def get_user_profile(username: str) -> dict:
+        """Fetch user profile from GitHub."""
+        try:
+            resp = requests.get(f'https://api.github.com/users/{username}', 
+                              headers=REST_HEADERS, timeout=30)
+            if resp.status_code == 200:
+                return resp.json()
+        except:
+            pass
+        return None
+    
+    @staticmethod
+    def search_commits(username: str, start_date, end_date) -> tuple:
+        """Search for commits by author in a date range."""
         commits = []
         page = 1
-
         query = f'author:{username} committer-date:{start_date}..{end_date}'
-
+        
         while page <= 10:
             url = 'https://api.github.com/search/commits'
             params = {'q': query, 'per_page': 100, 'page': page, 'sort': 'committer-date'}
-
+            
             try:
-                resp = requests.get(url, headers=SEARCH_HEADERS, params=params)
-
+                resp = requests.get(url, headers=SEARCH_HEADERS, params=params, timeout=30)
+                
                 if resp.status_code == 403:
                     reset_time = int(resp.headers.get('X-RateLimit-Reset', 0))
                     wait_time = max(reset_time - time.time(), 60)
-                    print(f"    Rate limited, waiting {wait_time:.0f}s...")
+                    print(f'    Rate limited, waiting {wait_time:.0f}s...')
                     time.sleep(wait_time)
                     continue
-
+                
                 if resp.status_code != 200:
-                    print(f"    Search error: {resp.status_code}")
                     break
-
+                
                 data = resp.json()
                 items = data.get('items', [])
-                total_count = data.get('total_count', 0)
-
+                
                 if not items:
                     break
-
+                
                 for item in items:
                     commit_obj = item.get('commit', {})
                     committer = commit_obj.get('committer', {})
-                    commit_date = committer.get('date', '')[:10]
-
+                    
                     commits.append({
                         'sha': item.get('sha', ''),
-                        'date': commit_date,
+                        'username': username,
+                        'date': committer.get('date', '')[:10],
                         'repo': item.get('repository', {}).get('full_name', ''),
-                        'message': commit_obj.get('message', '').split('\n')[0][:100],
+                        'message': commit_obj.get('message', '').split('\n')[0][:200],
                         'url': item.get('url', ''),
                         'additions': None,
                         'deletions': None
                     })
-
+                
                 if len(items) < 100:
                     break
-
+                
                 page += 1
                 time.sleep(REQUEST_DELAY * 2)
-
+            
             except Exception as e:
-                print(f"    Search error: {e}")
+                print(f'    Search error: {e}')
                 break
-
+        
         return commits, len(commits) >= 1000
+    
+    @staticmethod
+    def get_commit_stats(url: str) -> tuple:
+        """Fetch LOC stats for a commit."""
+        try:
+            resp = requests.get(url, headers=REST_HEADERS, timeout=30)
+            if resp.status_code == 200:
+                stats = resp.json().get('stats', {})
+                return stats.get('additions', 0), stats.get('deletions', 0)
+        except:
+            pass
+        return None, None
 
-    def _search_commits_for_month(self, username, year, month):
-        """Search for commits by author in a specific month, splitting if needed"""
+
+class GitHubStatsAnalyzer:
+    """Main analyzer class."""
+    
+    def __init__(self):
+        self.db = StatsDB()
+    
+    def fetch_user_profile(self, username: str):
+        """Fetch and cache user profile."""
+        profile = GitHubAPI.get_user_profile(username)
+        if profile:
+            self.db.save_user(profile)
+            print(f'  Fetched profile for {username}')
+        return profile
+    
+    def fetch_commits_for_month(self, username: str, year: int, month: int) -> list:
+        """Fetch commits for a specific month."""
         start_date = date(year, month, 1)
         if month == 12:
             end_date = date(year + 1, 1, 1) - timedelta(days=1)
         else:
             end_date = date(year, month + 1, 1) - timedelta(days=1)
-
-        # First try the whole month
-        commits, hit_limit = self._search_commits_for_range(username, start_date, end_date)
-
+        
+        commits, hit_limit = GitHubAPI.search_commits(username, start_date, end_date)
+        
         if hit_limit:
-            # Split month into weeks if we hit the limit
-            print(f"    Hit 1000 limit, splitting into weeks...")
+            print(f'    Hit 1000 limit, splitting into weeks...')
             commits = []
             week_start = start_date
-
+            
             while week_start <= end_date:
                 week_end = min(week_start + timedelta(days=6), end_date)
-                week_commits, week_hit_limit = self._search_commits_for_range(username, week_start, week_end)
-
-                if week_hit_limit:
-                    # Split week into days
-                    print(f"    Week {week_start} hit limit, splitting into days...")
+                week_commits, week_hit = GitHubAPI.search_commits(username, week_start, week_end)
+                
+                if week_hit:
+                    print(f'    Week {week_start} hit limit, splitting into days...')
                     for day_offset in range(7):
                         day = week_start + timedelta(days=day_offset)
                         if day > end_date:
                             break
-                        day_commits, _ = self._search_commits_for_range(username, day, day)
+                        day_commits, _ = GitHubAPI.search_commits(username, day, day)
                         commits.extend(day_commits)
                         time.sleep(REQUEST_DELAY)
                 else:
                     commits.extend(week_commits)
-
+                
                 week_start = week_end + timedelta(days=1)
                 time.sleep(REQUEST_DELAY)
-
-        return commits
-
-    def _fetch_commit_stats(self, commit):
-        """Fetch additions/deletions for a single commit"""
-        if commit.get('additions') is not None:
-            return commit
-            
-        url = commit.get('url')
-        if not url:
-            return commit
-            
-        try:
-            resp = requests.get(url, headers=REST_HEADERS)
-            if resp.status_code == 200:
-                data = resp.json()
-                stats = data.get('stats', {})
-                commit['additions'] = stats.get('additions', 0)
-                commit['deletions'] = stats.get('deletions', 0)
-        except:
-            pass
         
-        return commit
-
-    def _fetch_contribution_calendar(self, username, start_date):
-        """Fetch contribution calendar via GraphQL"""
-        end_date = datetime.now().date()
-        all_contributions = {}
-
-        query = '''
-        query($userName: String!, $from: DateTime!, $to: DateTime!) {
-            user(login: $userName) {
-                contributionsCollection(from: $from, to: $to) {
-                    contributionCalendar {
-                        totalContributions
-                        weeks { contributionDays { date contributionCount } }
-                    }
-                }
-            }
-        }
-        '''
-
-        current_start = start_date
-        while current_start < end_date:
-            current_end = min(current_start + relativedelta(years=1) - timedelta(days=1), end_date)
-
-            variables = {
-                "userName": username,
-                "from": current_start.isoformat() + "T00:00:00Z",
-                "to": current_end.isoformat() + "T23:59:59Z"
-            }
-
-            try:
-                response = requests.post('https://api.github.com/graphql', headers=HEADERS,
-                                       json={'query': query, 'variables': variables}, timeout=30)
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'errors' not in data:
-                        user_data = data.get('data', {}).get('user', {})
-                        collection = user_data.get('contributionsCollection', {})
-                        calendar = collection.get('contributionCalendar', {})
-                        for week in calendar.get('weeks', []):
-                            for day in week.get('contributionDays', []):
-                                all_contributions[day['date']] = day['contributionCount']
-            except:
-                pass
-
-            current_start = current_end + timedelta(days=1)
-            time.sleep(REQUEST_DELAY)
-
-        return all_contributions
-
-    def fetch_and_cache_commits(self, username, since_date=None):
-        """Incrementally fetch and cache commits"""
+        return commits
+    
+    def fetch_all_commits(self, username: str, since_date=None):
+        """Fetch all commits for a user."""
         if since_date is None:
             since_date = START_DATE
-            
-        cache = self._get_cache(username)
-        end_date = datetime.now().date()
         
-        # Find months that need fetching
+        # Fetch profile first
+        if not self.db.get_user(username):
+            self.fetch_user_profile(username)
+        
+        end_date = datetime.now().date()
         current = since_date
         months_to_fetch = []
         
         while current <= end_date:
             year, month = current.year, current.month
-            # Always refetch current month
-            if not cache.is_month_fetched(year, month) or (year == end_date.year and month == end_date.month):
+            if not self.db.is_month_fetched(username, year, month) or \
+               (year == end_date.year and month == end_date.month):
                 months_to_fetch.append((year, month))
             
             if month == 12:
@@ -287,245 +648,201 @@ class GitHubContributionAnalyzer:
             else:
                 current = date(year, month + 1, 1)
         
-        print(f"  {len(months_to_fetch)} months to fetch")
+        print(f'  {len(months_to_fetch)} months to fetch')
         
-        # Fetch commits for each month
         for year, month in months_to_fetch:
-            print(f"  Fetching {year}-{month:02d}...")
-            commits = self._search_commits_for_month(username, year, month)
-            print(f"    Found {len(commits)} commits")
-            cache.add_commits(commits)
-            cache.mark_month_fetched(year, month)
-            cache.save()
+            print(f'  Fetching {year}-{month:02d}...')
+            commits = self.fetch_commits_for_month(username, year, month)
+            print(f'    Found {len(commits)} commits')
+            
+            saved = self.db.save_commits(commits)
+            print(f'    Saved {saved} new commits')
+            
+            self.db.mark_month_fetched(username, year, month)
             time.sleep(REQUEST_DELAY)
+    
+    def fetch_loc_batch(self, username: str, batch_size: int = 500) -> int:
+        """Fetch LOC data for commits that don't have it."""
+        commits = self.db.get_commits_needing_loc(username, batch_size)
+        print(f'  {len(commits)} commits need LOC data')
         
-        return cache.get_all_commits()
-
-    def fetch_loc_for_commits(self, username, max_commits=500):
-        """Fetch LOC stats for commits that don't have them"""
-        cache = self._get_cache(username)
-        
-        # Find commits missing LOC data
-        commits_needing_loc = [c for c in cache.commits.values() if c.get('additions') is None]
-        print(f"  {len(commits_needing_loc)} commits need LOC data")
-        
-        # Fetch LOC for a batch
         fetched = 0
-        for commit in commits_needing_loc[:max_commits]:
-            self._fetch_commit_stats(commit)
-            cache.commits[commit['sha']] = commit
-            fetched += 1
-            
-            if fetched % 50 == 0:
-                cache.save()
-                print(f"    Fetched {fetched}/{min(len(commits_needing_loc), max_commits)} LOC stats")
+        for commit in commits:
+            additions, deletions = GitHubAPI.get_commit_stats(commit['url'])
+            if additions is not None:
+                self.db.update_commit_loc(commit['sha'], additions, deletions)
+                fetched += 1
+                
+                if fetched % 50 == 0:
+                    print(f'    Fetched {fetched}/{len(commits)} LOC stats')
             
             time.sleep(REQUEST_DELAY)
         
-        cache.save()
         return fetched
+    
+    def get_user_data(self, username: str, fetch: bool = False) -> dict:
+        """Get all data for a user. If fetch=True, fetches new data from GitHub first."""
+        if fetch:
+            self.fetch_all_commits(username)
+            self.fetch_loc_batch(username, 200)
 
-    def get_user_contributions(self, username, since_date=None):
-        if since_date is None:
-            since_date = START_DATE
+        user = self.db.get_user(username)
+        stats = self.db.get_stats(username)
+        daily = self.db.get_daily_stats(username, START_DATE.isoformat())
+        yearly = self.db.get_yearly_stats(username)
+        top_repos = self.db.get_top_repos(username, 15, 'commits')
+        top_repos_loc = self.db.get_top_repos(username, 15, 'additions')
+        monthly = self.db.get_monthly_stats(username)
+        recent = self.db.get_recent_commits(username, 20)
 
-        print(f"\nFetching contributions for {username} since {since_date}...")
-
-        # Get contribution calendar
-        contribution_counts = self._fetch_contribution_calendar(username, since_date)
-        print(f"  Got {len(contribution_counts)} days of contribution calendar data")
-
-        # Fetch and cache commits
-        all_commits = self.fetch_and_cache_commits(username, since_date)
-        print(f"  Total cached commits: {len(all_commits)}")
-
-        # Optionally fetch more LOC data
-        self.fetch_loc_for_commits(username, max_commits=200)
-
-        # Build daily stats
-        daily_stats = defaultdict(lambda: {'commits': 0, 'additions': 0, 'deletions': 0, 'repos': set(), 'contributions': 0})
-        
-        for commit in all_commits:
-            commit_date = commit.get('date', '')
-            if commit_date >= since_date.isoformat():
-                daily_stats[commit_date]['commits'] += 1
-                if commit.get('additions') is not None:
-                    daily_stats[commit_date]['additions'] += commit['additions']
-                    daily_stats[commit_date]['deletions'] += commit.get('deletions', 0)
-                if commit.get('repo'):
-                    daily_stats[commit_date]['repos'].add(commit['repo'])
-
-        for date_str, count in contribution_counts.items():
-            daily_stats[date_str]['contributions'] = count
-
-        # Build contributions array
-        contributions = []
-        end_date = datetime.now().date()
-        current_date = since_date
-        
-        while current_date <= end_date:
-            date_str = current_date.isoformat()
-            stats = daily_stats.get(date_str, {'commits': 0, 'additions': 0, 'deletions': 0, 'repos': set(), 'contributions': 0})
-            contributions.append({
-                'date': date_str,
-                'contributions': stats.get('contributions', 0) or contribution_counts.get(date_str, 0),
-                'commits': stats['commits'],
-                'additions': stats['additions'],
-                'deletions': stats['deletions'],
-                'net_loc': stats['additions'] - stats['deletions'],
-                'repos_count': len(stats.get('repos', set())),
-                'username': username
-            })
-            current_date += timedelta(days=1)
-
-        return contributions
-
-    def analyze_growth(self, contributions):
-        if not contributions:
-            return {}
-        df = pd.DataFrame(contributions)
-        df['date'] = pd.to_datetime(df['date'])
-        df = df.sort_values('date')
-        
-        for col in ['contributions', 'commits', 'additions', 'deletions', 'net_loc']:
-            df[f'{col}_7d_avg'] = df[col].rolling(window=7, min_periods=1).mean()
-            df[f'{col}_30d_avg'] = df[col].rolling(window=30, min_periods=1).mean()
-        
-        x_data = np.arange(len(df))
-        y_data = df['commits'].values
-        
-        try:
-            first_half_avg = y_data[:len(y_data)//2].mean()
-            second_half_avg = y_data[len(y_data)//2:].mean()
-            growth_rate = np.log(second_half_avg / first_half_avg) / (len(y_data)/2) if first_half_avg > 0 else 0
-            df['exponential_fit'] = y_data.mean() * np.exp(growth_rate * x_data)
-        except:
-            df['exponential_fit'] = df['commits']
-            growth_rate = 0
-            
-        def safe_float(val): return float(val) if not pd.isna(val) else 0.0
-        def safe_int(val): return int(val) if not pd.isna(val) else 0
-        
-        last_30 = df.tail(30)
-        prev_30 = df.iloc[-60:-30] if len(df) >= 60 else df.head(30)
-        
-        def calc_change(current, previous):
-            if previous == 0: return 100.0 if current > 0 else 0.0
-            return ((current - previous) / previous) * 100
-
-        df['year'] = df['date'].dt.year
-        yearly_stats = {}
-        for year in df['year'].unique():
-            year_data = df[df['year'] == year]
-            yearly_stats[int(year)] = {
-                'commits': safe_int(year_data['commits'].sum()),
-                'additions': safe_int(year_data['additions'].sum()),
-                'deletions': safe_int(year_data['deletions'].sum()),
-                'net_loc': safe_int(year_data['net_loc'].sum()),
-                'contributions': safe_int(year_data['contributions'].sum()),
-                'days_active': safe_int((year_data['commits'] > 0).sum())
-            }
-
-        total_days = len(df)
-        
-        stats = {
-            'total_contributions': safe_int(df['contributions'].sum()),
-            'total_commits': safe_int(df['commits'].sum()),
-            'total_additions': safe_int(df['additions'].sum()),
-            'total_deletions': safe_int(df['deletions'].sum()),
-            'net_loc_change': safe_int(df['net_loc'].sum()),
-            'total_days': total_days,
-            'days_with_commits': safe_int((df['commits'] > 0).sum()),
-            'average_contributions': safe_float(df['contributions'].mean()),
-            'average_commits': safe_float(df['commits'].mean()),
-            'average_additions': safe_float(df['additions'].mean()),
-            'average_deletions': safe_float(df['deletions'].mean()),
-            'average_net_loc': safe_float(df['net_loc'].mean()),
-            'maximum_contributions': safe_int(df['contributions'].max()),
-            'maximum_commits': safe_int(df['commits'].max()),
-            'maximum_additions': safe_int(df['additions'].max()),
-            'peak_periods_count': safe_int(len(df[df['commits'] > df['commits'].quantile(0.9)])),
-            'growth_rate': safe_float(growth_rate * 100),
-            'exponential_params': [1.0, safe_float(growth_rate), 0.0],
-            'commits_30d_change': safe_float(calc_change(last_30['commits'].sum(), prev_30['commits'].sum())),
-            'additions_30d_change': safe_float(calc_change(last_30['additions'].sum(), prev_30['additions'].sum())),
-            'deletions_30d_change': safe_float(calc_change(last_30['deletions'].sum(), prev_30['deletions'].sum())),
-            'last_7d_commits': safe_int(df.tail(7)['commits'].sum()),
-            'last_7d_additions': safe_int(df.tail(7)['additions'].sum()),
-            'last_7d_deletions': safe_int(df.tail(7)['deletions'].sum()),
-            'last_30d_commits': safe_int(df.tail(30)['commits'].sum()),
-            'last_30d_additions': safe_int(df.tail(30)['additions'].sum()),
-            'last_30d_deletions': safe_int(df.tail(30)['deletions'].sum()),
-            'yearly': yearly_stats,
+        return {
+            'user': user,
+            'stats': stats,
+            'daily': daily,
+            'yearly': yearly,
+            'top_repos': top_repos,
+            'top_repos_loc': top_repos_loc,
+            'monthly': monthly,
+            'recent': recent
         }
-        
-        def clean_record(record):
-            clean = {}
-            for key, value in record.items():
-                if pd.isna(value): clean[key] = None
-                elif isinstance(value, (np.integer, np.int64)): clean[key] = int(value)
-                elif isinstance(value, (np.floating, np.float64)): clean[key] = float(value)
-                elif isinstance(value, pd.Timestamp): clean[key] = value.isoformat()
-                else: clean[key] = value
-            return clean
-            
-        clean_data = [clean_record(record) for record in df.to_dict('records')]
-        return {'data': clean_data, 'stats': stats}
-
-    def get_all_users_data(self):
-        all_data = {}
-        for username in GITHUB_USERS:
-            contributions = self.get_user_contributions(username)
-            analysis = self.analyze_growth(contributions)
-            all_data[username] = analysis
-        return all_data
 
 
-def create_visualizations(data):
-    visualizations = {}
-    for username, user_data in data.items():
-        if not user_data.get('data'):
-            continue
-        df = pd.DataFrame(user_data['data'])
+def create_visualizations(data: dict) -> dict:
+    """Create Plotly visualizations."""
+    viz = {}
+    
+    # Daily commits line chart
+    if data.get('daily'):
+        df = pd.DataFrame(data['daily'])
         df['date'] = pd.to_datetime(df['date'])
+        df['commits_7d'] = df['commits'].rolling(7, min_periods=1).mean()
+        df['commits_30d'] = df['commits'].rolling(30, min_periods=1).mean()
         
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df['date'], y=df['commits'], mode='lines', name='Commits', line=dict(color='#667eea', width=1), opacity=0.5))
-        fig.add_trace(go.Scatter(x=df['date'], y=df['commits_7d_avg'], mode='lines', name='7-Day Avg', line=dict(color='#667eea', width=2)))
-        fig.add_trace(go.Scatter(x=df['date'], y=df['commits_30d_avg'], mode='lines', name='30-Day Avg', line=dict(color='#f5576c', width=2)))
-        fig.update_layout(title=f'{username} - Commits Over Time', xaxis_title='Date', yaxis_title='Commits', hovermode='x unified', template='plotly_white', height=400)
-        try: visualizations[f'{username}_timeseries'] = fig.to_json()
-        except Exception as e: visualizations[f'{username}_timeseries'] = json.dumps({"error": str(e)})
+        fig.add_trace(go.Scatter(x=df['date'], y=df['commits'], mode='lines', 
+                                name='Daily', line=dict(color='rgba(255,255,255,0.2)', width=1)))
+        fig.add_trace(go.Scatter(x=df['date'], y=df['commits_7d'], mode='lines', 
+                                name='7-day avg', line=dict(color='#fff', width=2)))
+        fig.add_trace(go.Scatter(x=df['date'], y=df['commits_30d'], mode='lines', 
+                                name='30-day avg', line=dict(color='rgba(255,255,255,0.5)', width=2, dash='dash')))
+        fig.update_layout(
+            template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#fff'), margin=dict(l=40, r=20, t=20, b=40),
+            xaxis=dict(gridcolor='#262626'), yaxis=dict(gridcolor='#262626'),
+            legend=dict(orientation='h', y=1.1)
+        )
+        viz['commits_timeline'] = fig.to_json()
+    
+    # LOC area chart
+    if data.get('daily'):
+        df = pd.DataFrame(data['daily'])
+        df['date'] = pd.to_datetime(df['date'])
+        df['net'] = df['additions'] - df['deletions']
+        df['net_30d'] = df['net'].rolling(30, min_periods=1).mean()
         
-        loc_fig = go.Figure()
-        loc_fig.add_trace(go.Bar(x=df['date'], y=df['additions'], name='Additions', marker_color='#2ecc71', opacity=0.7))
-        loc_fig.add_trace(go.Bar(x=df['date'], y=[-d for d in df['deletions']], name='Deletions', marker_color='#e74c3c', opacity=0.7))
-        loc_fig.add_trace(go.Scatter(x=df['date'], y=df['net_loc_30d_avg'], mode='lines', name='Net LOC (30d avg)', line=dict(color='#3498db', width=3)))
-        loc_fig.update_layout(title=f'{username} - Lines of Code Changes', xaxis_title='Date', yaxis_title='Lines of Code', barmode='relative', hovermode='x unified', template='plotly_white', height=400)
-        try: visualizations[f'{username}_loc'] = loc_fig.to_json()
-        except Exception as e: visualizations[f'{username}_loc'] = json.dumps({"error": str(e)})
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=df['date'], y=df['additions'], name='Added', 
+                            marker_color='rgba(255,255,255,0.7)'))
+        fig.add_trace(go.Bar(x=df['date'], y=-df['deletions'], name='Deleted', 
+                            marker_color='rgba(255,255,255,0.3)'))
+        fig.add_trace(go.Scatter(x=df['date'], y=df['net_30d'], mode='lines', 
+                                name='Net (30d)', line=dict(color='#fff', width=3)))
+        fig.update_layout(
+            template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#fff'), margin=dict(l=40, r=20, t=20, b=40), barmode='relative',
+            xaxis=dict(gridcolor='#262626'), yaxis=dict(gridcolor='#262626'),
+            legend=dict(orientation='h', y=1.1)
+        )
+        viz['loc_timeline'] = fig.to_json()
+    
+    # Top repos bar chart
+    if data.get('top_repos'):
+        df = pd.DataFrame(data['top_repos'][:10])
+        df['short_repo'] = df['repo'].apply(lambda x: x.split('/')[-1][:20] if x else '')
         
-        df['year'] = df['date'].dt.year
-        df['month'] = df['date'].dt.month
-        heatmap_data = df.pivot_table(values='commits', index='year', columns='month', aggfunc='sum', fill_value=0)
-        heatmap_z = heatmap_data.values.tolist()
-        heatmap_fig = go.Figure(data=go.Heatmap(
-            z=heatmap_z, 
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=df['commits'], y=df['short_repo'], orientation='h',
+                            marker_color='#fff', text=df['commits'], textposition='auto'))
+        fig.update_layout(
+            template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#fff'), margin=dict(l=120, r=20, t=20, b=40),
+            yaxis=dict(autorange='reversed'), xaxis_title='Commits'
+        )
+        viz['top_repos'] = fig.to_json()
+    
+    # Top repos by LOC
+    if data.get('top_repos_loc'):
+        df = pd.DataFrame(data['top_repos_loc'][:10])
+        df['short_repo'] = df['repo'].apply(lambda x: x.split('/')[-1][:20] if x else '')
+        
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=df['additions'], y=df['short_repo'], orientation='h', name='Added',
+                            marker_color='rgba(255,255,255,0.8)'))
+        fig.add_trace(go.Bar(x=-df['deletions'], y=df['short_repo'], orientation='h', name='Deleted',
+                            marker_color='rgba(255,255,255,0.3)'))
+        fig.update_layout(
+            template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#fff'), margin=dict(l=120, r=20, t=20, b=40), barmode='relative',
+            yaxis=dict(autorange='reversed'), xaxis_title='Lines of Code',
+            legend=dict(orientation='h', y=1.1)
+        )
+        viz['top_repos_loc'] = fig.to_json()
+    
+    # Monthly heatmap
+    if data.get('monthly'):
+        df = pd.DataFrame(data['monthly'])
+        pivot = df.pivot(index='year', columns='month', values='commits').fillna(0)
+        
+        fig = go.Figure(data=go.Heatmap(
+            z=pivot.values,
             x=['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-            y=[str(y) for y in heatmap_data.index.tolist()],
-            colorscale='Viridis', 
+            y=[str(y) for y in pivot.index],
+            colorscale=[[0, '#0a0a0a'], [0.5, '#404040'], [1, '#ffffff']],
             colorbar=dict(title='Commits')
         ))
-        heatmap_fig.update_layout(title=f'{username} - Commits by Year/Month', xaxis_title='Month', yaxis_title='Year', height=350)
-        try: visualizations[f'{username}_heatmap'] = heatmap_fig.to_json()
-        except Exception as e: visualizations[f'{username}_heatmap'] = json.dumps({"error": str(e)})
-        
-    return visualizations
+        fig.update_layout(
+            template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#fff'), margin=dict(l=40, r=20, t=20, b=40)
+        )
+        viz['heatmap'] = fig.to_json()
+    
+    # Yearly bar chart
+    if data.get('yearly'):
+        df = pd.DataFrame(data['yearly'])
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=df['year'], y=df['commits'], name='Commits',
+                            marker_color='#fff', text=df['commits'], textposition='auto'))
+        fig.update_layout(
+            template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#fff'), margin=dict(l=40, r=20, t=20, b=40)
+        )
+        viz['yearly_commits'] = fig.to_json()
+
+    # Day of week bar chart
+    stats = data.get('stats', {})
+    dow_stats = stats.get('day_of_week_stats', {})
+    if dow_stats:
+        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        days = [d for d in days_order if d in dow_stats]
+        values = [dow_stats.get(d, 0) for d in days]
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=days, y=values, marker_color='#fff', text=values, textposition='auto'))
+        fig.update_layout(
+            template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#fff'), margin=dict(l=40, r=20, t=20, b=40)
+        )
+        viz['day_of_week'] = fig.to_json()
+
+    return viz
 
 
-analyzer = GitHubContributionAnalyzer()
+# Initialize analyzer
+analyzer = GitHubStatsAnalyzer()
 
 
+# Flask routes
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -534,207 +851,329 @@ def index():
 @app.route('/api/data')
 def get_data():
     try:
-        data = analyzer.get_all_users_data()
-        visualizations = create_visualizations(data)
-        return jsonify({'success': True, 'data': data, 'visualizations': visualizations, 'users': GITHUB_USERS})
+        all_data = {}
+        all_viz = {}
+
+        # Get users from database (those with data) + configured users
+        conn = analyzer.db._get_conn()
+        db_users = [r[0] for r in conn.execute('SELECT username FROM users').fetchall()]
+        conn.close()
+
+        # Merge with config users
+        users = list(set(GITHUB_USERS + db_users))
+
+        for username in users:
+            print(f'Loading data for {username}...')
+            data = analyzer.get_user_data(username, fetch=False)
+            # Only include users with actual data
+            if data.get('stats') and data['stats'].get('total_commits', 0) > 0:
+                all_data[username] = data
+                all_viz[username] = create_visualizations(data)
+
+        active_users = list(all_data.keys())
+        return jsonify({
+            'success': True,
+            'data': all_data,
+            'visualizations': all_viz,
+            'users': active_users
+        })
     except Exception as e:
         import traceback
-        traceback.print_exc()
+        if DEBUG:
+            traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)})
 
 
 @app.route('/api/user/<username>')
 def get_user_data(username):
     try:
-        contributions = analyzer.get_user_contributions(username)
-        analysis = analyzer.analyze_growth(contributions)
-        return jsonify({'success': True, 'data': analysis})
+        data = analyzer.get_user_data(username)
+        viz = create_visualizations(data)
+        return jsonify({'success': True, 'data': data, 'visualizations': viz})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
 
+@app.route('/api/stats')
+def get_stats():
+    stats = {}
+    for username in GITHUB_USERS:
+        stats[username] = analyzer.db.get_stats(username)
+    return jsonify({'success': True, 'stats': stats})
+
+
+@app.route('/api/top-repos/<username>')
+def get_top_repos(username):
+    order = request.args.get('order', 'commits')
+    limit = int(request.args.get('limit', 20))
+    repos = analyzer.db.get_top_repos(username, limit, order)
+    return jsonify({'success': True, 'repos': repos})
+
+
+@app.route('/api/search/<username>')
+def search_commits(username):
+    from flask import request
+    query = request.args.get('q', '')
+    commits = analyzer.db.search_commits(username, query)
+    return jsonify({'success': True, 'commits': commits})
+
+
 @app.route('/api/refresh')
 def refresh_data():
-    for cache in analyzer.caches.values():
-        cache.meta['months_fetched'] = []
-    return jsonify({'success': True, 'message': 'Cache metadata cleared, will refetch'})
+    # Clear fetch metadata to force refetch
+    conn = analyzer.db._get_conn()
+    conn.execute('DELETE FROM fetch_meta')
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'message': 'Cache cleared'})
 
 
-@app.route('/api/fetch-more-loc')
+@app.route('/api/fetch-loc')
 def fetch_more_loc():
-    """Endpoint to fetch more LOC data for cached commits"""
-    total_fetched = 0
+    total = 0
     for username in GITHUB_USERS:
-        fetched = analyzer.fetch_loc_for_commits(username, max_commits=500)
-        total_fetched += fetched
-    return jsonify({'success': True, 'fetched': total_fetched})
+        fetched = analyzer.fetch_loc_batch(username, 500)
+        total += fetched
+    return jsonify({'success': True, 'fetched': total})
+
+
+@app.route('/api/users')
+def list_users():
+    """List all users in the database."""
+    conn = analyzer.db._get_conn()
+    rows = conn.execute('SELECT username, avatar_url, name FROM users').fetchall()
+    conn.close()
+    users = [{'username': r[0], 'avatar_url': r[1], 'name': r[2]} for r in rows]
+    return jsonify({'success': True, 'users': users})
+
+
+@app.route('/api/fetch/<username>')
+def fetch_user(username):
+    """Fetch all data for a new user."""
+    from flask import Response
+
+    def generate():
+        yield f'data: {{"status": "starting", "message": "Fetching profile for {username}..."}}\n\n'
+
+        # Fetch user profile
+        user_data = analyzer.api.get_user(username)
+        if not user_data:
+            yield f'data: {{"status": "error", "message": "User {username} not found"}}\n\n'
+            return
+
+        # Save user
+        analyzer.db.save_user(user_data)
+        yield f'data: {{"status": "progress", "message": "Profile saved: {user_data.get("name", username)}"}}\n\n'
+
+        # Fetch commits via search
+        yield f'data: {{"status": "progress", "message": "Fetching commits since {START_DATE}..."}}\n\n'
+
+        # Get contribution calendar first
+        calendar = analyzer.api.get_contribution_calendar(username)
+        total_days = len(calendar) if calendar else 0
+        yield f'data: {{"status": "progress", "message": "Got {total_days} days of calendar data"}}\n\n'
+
+        # Determine which months to fetch
+        last_fetch = analyzer.db.get_fetch_meta(username, 'commits')
+        if last_fetch:
+            start_month = datetime.strptime(last_fetch, '%Y-%m')
+        else:
+            start_month = datetime.strptime(START_DATE[:7], '%Y-%m')
+
+        current = datetime.now()
+        months = []
+        m = start_month
+        while m <= current:
+            months.append(m.strftime('%Y-%m'))
+            if m.month == 12:
+                m = m.replace(year=m.year + 1, month=1)
+            else:
+                m = m.replace(month=m.month + 1)
+
+        yield f'data: {{"status": "progress", "message": "{len(months)} months to fetch"}}\n\n'
+
+        # Fetch each month
+        total_commits = 0
+        for month in months:
+            yield f'data: {{"status": "progress", "message": "Fetching {month}..."}}\n\n'
+
+            start = f'{month}-01'
+            if month[5:] == '12':
+                end = f'{int(month[:4]) + 1}-01-01'
+            else:
+                end = f'{month[:5]}{int(month[5:]) + 1:02d}-01'
+
+            commits = analyzer.api.search_commits(username, start, end)
+            if commits:
+                saved = analyzer.db.save_commits(username, commits)
+                total_commits += len(commits)
+                yield f'data: {{"status": "progress", "message": "  Found {len(commits)} commits, saved {saved} new"}}\n\n'
+
+            # Update fetch meta
+            analyzer.db.set_fetch_meta(username, 'commits', month)
+
+        # Get total cached commits
+        stats = analyzer.db.get_stats(username)
+        total = stats.get('total_commits', 0)
+        yield f'data: {{"status": "progress", "message": "Total cached commits: {total}"}}\n\n'
+
+        # Fetch some LOC data
+        yield f'data: {{"status": "progress", "message": "Fetching LOC data (batch of 200)..."}}\n\n'
+        fetched = analyzer.fetch_loc_batch(username, 200)
+        yield f'data: {{"status": "progress", "message": "Fetched LOC for {fetched} commits"}}\n\n'
+
+        # Done
+        yield f'data: {{"status": "complete", "message": "Fetch complete for {username}"}}\n\n'
+
+    return Response(generate(), mimetype='text/event-stream',
+                   headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 def export_static_site(output_dir: Path):
-    """Export a static HTML dashboard that can be hosted on GitHub Pages."""
+    """Export static HTML dashboard."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    print(f"\nExporting static site to {output_dir}...")
+    print(f'\nExporting static site to {output_dir}...')
     
-    # Fetch all data
-    data = analyzer.get_all_users_data()
-    visualizations = create_visualizations(data)
+    all_data = {}
+    all_viz = {}
     
-    # Read the template
-    template_path = Path(__file__).parent / 'templates' / 'index.html'
-    with open(template_path) as f:
-        html_template = f.read()
+    for username in GITHUB_USERS:
+        data = analyzer.get_user_data(username)
+        all_data[username] = data
+        all_viz[username] = create_visualizations(data)
     
-    # Create static HTML with embedded data
     static_data = {
         'success': True,
-        'data': data,
-        'visualizations': visualizations,
+        'data': all_data,
+        'visualizations': all_viz,
         'users': GITHUB_USERS
     }
     
-    # Embed the data directly into the HTML
+    # Read template
+    template_path = Path(__file__).parent / 'templates' / 'index.html'
+    with open(template_path) as f:
+        html = f.read()
+    
+    # Inject data
     data_json = json.dumps(static_data, default=str)
+    injection = f'<script>window.STATIC_DATA = {data_json};</script>\n'
+    html = html.replace('<script>', injection + '<script>', 1)
     
-    # Inject data and modify script to use it
-    injection_script = f'''
-    <script>
-        // Pre-loaded data (exported {datetime.now().strftime('%Y-%m-%d %H:%M')})
-        window.STATIC_DATA = {data_json};
-    </script>
-    '''
-    
-    # Insert before the main script
-    static_html = html_template.replace(
-        '<script>\n        let currentUser = null;',
-        injection_script + '\n    <script>\n        let currentUser = null;'
-    )
-    
-    # Modify initApp to use static data
-    static_html = static_html.replace(
-        '''async function initApp() {
-            showLoading();
-            try {
-                const response = await fetch('/api/data');
-                const data = await response.json();
-
-                if (data.success) {
-                    allData = data;
-                    setupUserButtons(data.users);
-                    if (data.users.length > 0) {
-                        selectUser(data.users[0]);
-                    }
-                } else {
-                    showError(data.error || 'Failed to fetch data');
-                }
-            } catch (error) {
-                showError('Network error: ' + error.message);
-            }
-        }''',
-        '''async function initApp() {
-            // Use pre-loaded static data
-            if (window.STATIC_DATA) {
-                allData = window.STATIC_DATA;
-                setupUserButtons(allData.users);
-                if (allData.users.length > 0) {
-                    selectUser(allData.users[0]);
-                }
-                return;
-            }
-            // Fallback to API fetch for server mode
-            showLoading();
-            try {
-                const response = await fetch('/api/data');
-                const data = await response.json();
-                if (data.success) {
-                    allData = data;
-                    setupUserButtons(data.users);
-                    if (data.users.length > 0) {
-                        selectUser(data.users[0]);
-                    }
-                } else {
-                    showError(data.error || 'Failed to fetch data');
-                }
-            } catch (error) {
-                showError('Network error: ' + error.message);
-            }
-        }'''
+    # Modify fetch to use static data
+    html = html.replace(
+        'const response = await fetch',
+        'if (window.STATIC_DATA) { allData = window.STATIC_DATA; setupUserButtons(allData.users); if (allData.users.length > 0) selectUser(allData.users[0]); return; }\n            const response = await fetch'
     )
     
     # Update title
-    users_str = ' & '.join(GITHUB_USERS)
-    static_html = static_html.replace(
-        '<title>GitHub Contribution Analyzer</title>',
-        f'<title>GitHub Stats - {users_str}</title>'
-    )
+    html = html.replace('<title>GitHub Contribution Analyzer</title>',
+                       f'<title>GitHub Stats - {" & ".join(GITHUB_USERS)}</title>')
     
     # Add footer
-    generated_at = datetime.now().strftime('%Y-%m-%d %H:%M')
-    static_html = static_html.replace(
-        '</body>',
-        f'''<footer style="text-align:center;padding:20px;opacity:0.5;font-size:0.8rem;">
-        Generated {generated_at} | <a href="https://github.com/zeekay/stats" style="color:#667eea;">GitHub Stats</a>
-    </footer>
-</body>'''
-    )
+    html = html.replace('</body>', 
+        f'<footer style="text-align:center;padding:2rem;color:#666;font-size:0.75rem;">Generated {datetime.now().strftime("%Y-%m-%d")} | <a href="https://github.com/zeekay/stats" style="color:#888">GitHub Stats</a></footer></body>')
     
-    # Write output
-    output_file = output_dir / 'index.html'
-    with open(output_file, 'w') as f:
-        f.write(static_html)
+    # Write files
+    (output_dir / 'index.html').write_text(html)
+    (output_dir / 'data.json').write_text(json.dumps(static_data, default=str, indent=2))
     
-    # Also export raw data
-    data_file = output_dir / 'data.json'
-    with open(data_file, 'w') as f:
-        json.dump(static_data, f, default=str, indent=2)
-    
-    print(f"  Created {output_file}")
-    print(f"  Created {data_file}")
-    print(f"\nStatic site exported!")
-    print(f"Preview: python -m http.server -d {output_dir} 8000")
+    print(f'  Created {output_dir}/index.html')
+    print(f'  Created {output_dir}/data.json')
+    print(f'\nPreview: python -m http.server -d {output_dir} 8000')
 
 
 if __name__ == '__main__':
     import argparse
     
-    parser = argparse.ArgumentParser(description='GitHub Contribution Analyzer')
-    parser.add_argument('--export', type=str, metavar='DIR',
-                       help='Export static HTML dashboard to directory')
-    parser.add_argument('--fetch-loc', action='store_true',
-                       help='Fetch LOC data for all cached commits')
-    parser.add_argument('--refresh', action='store_true',
-                       help='Clear cache metadata and refetch')
+    parser = argparse.ArgumentParser(description='GitHub Stats - Analyze your contribution history')
+    parser.add_argument('--export', type=str, metavar='DIR', help='Export static site')
+    parser.add_argument('--fetch-loc', action='store_true', help='Fetch all LOC data')
+    parser.add_argument('--stats', action='store_true', help='Show statistics')
+    parser.add_argument('--migrate', action='store_true', help='Migrate from JSONL to SQLite')
     
     args = parser.parse_args()
     
-    print(f"\nGitHub Contribution Analyzer")
-    print(f"Users: {GITHUB_USERS}")
-    print(f"Since: {START_DATE}")
-    print(f"Cache: {CACHE_DIR}")
+    print(f'\nGitHub Stats')
+    print(f'Users: {GITHUB_USERS}')
+    print(f'Since: {START_DATE}')
+    print(f'Database: {DB_PATH}')
     
-    if args.refresh:
+    if args.stats:
         for username in GITHUB_USERS:
-            cache = analyzer._get_cache(username)
-            cache.meta['months_fetched'] = []
-            cache.save()
-        print("Cache cleared. Will refetch on next run.")
+            stats = analyzer.db.get_stats(username)
+            user = analyzer.db.get_user(username)
+            print(f'\n{username}:')
+            if user:
+                print(f'  Avatar: {user.get("avatar_url", "N/A")}')
+            print(f'  Commits: {stats["total_commits"]:,}')
+            print(f'  With LOC: {stats["with_loc"]:,} ({100*stats["with_loc"]/max(stats["total_commits"],1):.1f}%)')
+            print(f'  Total +{stats["total_additions"]:,} / -{stats["total_deletions"]:,}')
+            print(f'  Net: {stats["net_loc"]:+,}')
     
-    if args.fetch_loc:
-        print("\nFetching LOC data...")
+    elif args.fetch_loc:
         for username in GITHUB_USERS:
-            print(f"\n{username}:")
+            print(f'\n{username}:')
             while True:
-                fetched = analyzer.fetch_loc_for_commits(username, max_commits=500)
+                fetched = analyzer.fetch_loc_batch(username, 500)
                 if fetched == 0:
-                    print(f"  Done - all LOC fetched")
+                    print('  Done')
                     break
+    
+    elif args.migrate:
+        # Migrate from JSONL
+        from pathlib import Path
+        cache_dir = Path('./cache')
+        for username in GITHUB_USERS:
+            user_dir = cache_dir / username
+            if not user_dir.exists():
+                continue
+            
+            print(f'\nMigrating {username}...')
+            commits = []
+            
+            # Load from JSONL files
+            commits_dir = user_dir / 'commits'
+            loc_dir = user_dir / 'loc'
+            
+            if commits_dir.exists():
+                for f in commits_dir.glob('*.jsonl'):
+                    with open(f) as fp:
+                        for line in fp:
+                            try:
+                                c = json.loads(line.strip())
+                                c['username'] = username
+                                commits.append(c)
+                            except:
+                                pass
+            
+            # Load LOC data
+            loc_data = {}
+            if loc_dir.exists():
+                for f in loc_dir.glob('*.jsonl'):
+                    with open(f) as fp:
+                        for line in fp:
+                            try:
+                                d = json.loads(line.strip())
+                                loc_data[d['sha']] = (d.get('additions'), d.get('deletions'))
+                            except:
+                                pass
+            
+            # Merge LOC data
+            for c in commits:
+                if c['sha'] in loc_data:
+                    c['additions'], c['deletions'] = loc_data[c['sha']]
+            
+            # Save to SQLite
+            analyzer.db.save_commits(commits)
+            print(f'  Migrated {len(commits)} commits')
     
     elif args.export:
         export_static_site(Path(args.export))
     
     else:
-        print(f"Port: {PORT}\n")
+        print(f'Port: {PORT}\n')
         if DEBUG:
             app.run(debug=True, port=PORT)
         else:
