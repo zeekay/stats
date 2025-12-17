@@ -800,6 +800,97 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        /* Settings panel */
+        .settings-panel {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .settings-panel h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+
+        .settings-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .settings-group label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+
+        .settings-group .hint {
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+            margin-top: 0.25rem;
+        }
+
+        .settings-group input[type="password"],
+        .settings-group input[type="text"] {
+            width: 100%;
+            max-width: 400px;
+            padding: 0.5rem 0.75rem;
+            background: var(--secondary);
+            color: var(--foreground);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 0.875rem;
+        }
+
+        .settings-group input:focus {
+            outline: none;
+            border-color: var(--ring);
+        }
+
+        .rate-limit-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--secondary);
+            border-radius: var(--radius);
+            font-size: 0.8rem;
+        }
+
+        .rate-limit-status.ok { border-left: 3px solid #22c55e; }
+        .rate-limit-status.warning { border-left: 3px solid #eab308; }
+        .rate-limit-status.error { border-left: 3px solid #ef4444; }
+
+        .fetch-controls {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .fetch-controls button {
+            padding: 0.5rem 1rem;
+            background: var(--primary);
+            color: var(--primary-foreground);
+            border: none;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .fetch-controls button:hover { opacity: 0.9; }
+        .fetch-controls button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .fetch-controls .secondary-btn {
+            background: var(--secondary);
+            color: var(--foreground);
+            border: 1px solid var(--border);
+        }
     </style>
 </head>
 <body>
@@ -834,6 +925,7 @@
                 <button class="tab-btn active" onclick="switchTab('dashboard')">Dashboard</button>
                 <button class="tab-btn" onclick="switchTab('sql')">SQL</button>
                 <button class="tab-btn" onclick="switchTab('graphql')">GraphQL</button>
+                <button class="tab-btn" onclick="switchTab('settings')">Settings</button>
             </div>
 
             <!-- Dashboard Tab -->
@@ -951,6 +1043,70 @@ LIMIT 20;</textarea>
                             <pre id="gqlResults" style="margin:0;min-height:120px;font-size:0.8rem;color:var(--foreground);white-space:pre-wrap">Results will appear here...</pre>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div id="tab-settings" class="tab-content">
+                <div class="settings-panel">
+                    <h3>GitHub API Configuration</h3>
+                    <p style="color:var(--muted-foreground);margin-bottom:1.5rem;font-size:0.875rem">
+                        Configure your GitHub token to fetch data dynamically. Without a token, you're limited to 60 requests/hour.
+                        With a token, you get 5,000 requests/hour.
+                    </p>
+
+                    <div class="settings-group">
+                        <label for="apiToken">GitHub Personal Access Token</label>
+                        <div style="display:flex;gap:0.5rem;align-items:center">
+                            <input type="password" id="apiToken" placeholder="ghp_xxxxxxxxxxxx" />
+                            <button onclick="toggleTokenVisibility()" class="secondary-btn" style="padding:0.5rem 0.75rem;background:var(--secondary);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;color:var(--foreground)">Show</button>
+                            <button onclick="saveApiToken()" style="padding:0.5rem 1rem;background:var(--primary);color:var(--primary-foreground);border:none;border-radius:var(--radius);cursor:pointer;font-weight:500">Save</button>
+                            <button onclick="clearApiToken()" class="secondary-btn" style="padding:0.5rem 0.75rem;background:var(--secondary);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;color:var(--muted-foreground)">Clear</button>
+                        </div>
+                        <p class="hint">
+                            Create a token at <a href="https://github.com/settings/tokens" target="_blank" style="color:var(--foreground)">github.com/settings/tokens</a>.
+                            Scopes needed: <code>public_repo</code> (or <code>repo</code> for private repos).
+                        </p>
+                    </div>
+
+                    <div class="settings-group">
+                        <label>Rate Limit Status</label>
+                        <div id="rateLimitStatus" class="rate-limit-status">
+                            <span>Checking...</span>
+                        </div>
+                        <button onclick="checkRateLimit()" style="margin-top:0.5rem;padding:0.4rem 0.75rem;background:var(--secondary);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;color:var(--foreground);font-size:0.8rem">
+                            Refresh Status
+                        </button>
+                    </div>
+                </div>
+
+                <div class="settings-panel">
+                    <h3>Client-Side Data Fetching</h3>
+                    <p style="color:var(--muted-foreground);margin-bottom:1.5rem;font-size:0.875rem">
+                        Fetch GitHub data directly from your browser using your API token. This works on the static site deployment.
+                    </p>
+
+                    <div class="settings-group">
+                        <label for="fetchUsername">Fetch User Data</label>
+                        <div class="fetch-controls">
+                            <input type="text" id="fetchUsername" placeholder="GitHub username" style="padding:0.5rem 0.75rem;background:var(--secondary);border:1px solid var(--border);border-radius:var(--radius);color:var(--foreground);width:200px" />
+                            <button onclick="clientFetchUser()">Fetch User</button>
+                            <button onclick="clientFetchLoc()" class="secondary-btn">Fetch More LOC</button>
+                        </div>
+                        <p class="hint">Fetches contribution data directly via GitHub API using your token.</p>
+                    </div>
+
+                    <div id="clientFetchProgress" class="progress-log hidden"></div>
+                </div>
+
+                <div class="settings-panel">
+                    <h3>Data Export</h3>
+                    <div class="fetch-controls">
+                        <button onclick="exportData('json')">Export JSON</button>
+                        <button onclick="exportData('csv')" class="secondary-btn">Export CSV</button>
+                        <button onclick="downloadDatabase()" class="secondary-btn">Download SQLite</button>
+                    </div>
+                    <p class="hint" style="margin-top:0.5rem">Export your data for backup or analysis in other tools.</p>
                 </div>
             </div>
         </div>
@@ -1918,7 +2074,297 @@ ORDER BY date DESC LIMIT 20;`
         window.addEventListener('load', () => {
             initApp();
             updateFetchStatus();
+            loadApiToken();
+            checkRateLimit();
         });
+
+        // ==================== Settings & API Token ====================
+        const STORAGE_KEY = 'github_stats_token';
+
+        function loadApiToken() {
+            const token = localStorage.getItem(STORAGE_KEY);
+            if (token) {
+                document.getElementById('apiToken').value = token;
+            }
+        }
+
+        function saveApiToken() {
+            const token = document.getElementById('apiToken').value.trim();
+            if (token) {
+                localStorage.setItem(STORAGE_KEY, token);
+                alert('Token saved! It will be used for client-side API requests.');
+                checkRateLimit();
+            } else {
+                alert('Please enter a token first.');
+            }
+        }
+
+        function clearApiToken() {
+            localStorage.removeItem(STORAGE_KEY);
+            document.getElementById('apiToken').value = '';
+            alert('Token cleared.');
+            checkRateLimit();
+        }
+
+        function toggleTokenVisibility() {
+            const input = document.getElementById('apiToken');
+            const btn = event.target;
+            if (input.type === 'password') {
+                input.type = 'text';
+                btn.textContent = 'Hide';
+            } else {
+                input.type = 'password';
+                btn.textContent = 'Show';
+            }
+        }
+
+        function getApiToken() {
+            return localStorage.getItem(STORAGE_KEY) || '';
+        }
+
+        async function checkRateLimit() {
+            const statusEl = document.getElementById('rateLimitStatus');
+            const token = getApiToken();
+
+            try {
+                const headers = token ? { 'Authorization': `token ${token}` } : {};
+                const response = await fetch('https://api.github.com/rate_limit', { headers });
+                const data = await response.json();
+
+                const core = data.resources?.core || data.rate;
+                const remaining = core.remaining;
+                const limit = core.limit;
+                const reset = new Date(core.reset * 1000);
+                const resetStr = reset.toLocaleTimeString();
+
+                let statusClass = 'ok';
+                if (remaining < 10) statusClass = 'error';
+                else if (remaining < limit * 0.2) statusClass = 'warning';
+
+                statusEl.className = `rate-limit-status ${statusClass}`;
+                statusEl.innerHTML = `
+                    <strong>${remaining}</strong> / ${limit} requests remaining
+                    <span style="color:var(--muted-foreground);margin-left:0.5rem">
+                        (resets at ${resetStr})
+                    </span>
+                    ${token ? '<span style="color:#22c55e;margin-left:0.5rem">✓ Authenticated</span>' : '<span style="color:var(--muted-foreground);margin-left:0.5rem">Unauthenticated</span>'}
+                `;
+            } catch (e) {
+                statusEl.className = 'rate-limit-status error';
+                statusEl.innerHTML = `<span>Error checking rate limit: ${e.message}</span>`;
+            }
+        }
+
+        // ==================== Client-Side Fetching ====================
+        async function clientFetchUser() {
+            const username = document.getElementById('fetchUsername').value.trim();
+            const progressLog = document.getElementById('clientFetchProgress');
+            const token = getApiToken();
+
+            if (!username) {
+                alert('Please enter a GitHub username');
+                return;
+            }
+
+            progressLog.classList.remove('hidden');
+            progressLog.innerHTML = '<p>Starting fetch...</p>';
+
+            const log = (msg, status = '') => {
+                const p = document.createElement('p');
+                p.textContent = msg;
+                if (status) p.className = `status-${status}`;
+                progressLog.appendChild(p);
+                progressLog.scrollTop = progressLog.scrollHeight;
+            };
+
+            try {
+                const headers = token ? { 'Authorization': `token ${token}` } : {};
+
+                // Fetch user profile
+                log(`Fetching profile for ${username}...`);
+                const userResp = await fetch(`https://api.github.com/users/${username}`, { headers });
+                if (!userResp.ok) throw new Error(`User not found: ${userResp.status}`);
+                const userData = await userResp.json();
+                log(`Found: ${userData.name || username} (${userData.public_repos} repos)`, 'complete');
+
+                // Fetch contribution events
+                log('Fetching recent events...');
+                const eventsResp = await fetch(`https://api.github.com/users/${username}/events?per_page=100`, { headers });
+                const events = await eventsResp.json();
+                const pushEvents = events.filter(e => e.type === 'PushEvent');
+                log(`Found ${pushEvents.length} push events`, 'complete');
+
+                // Count commits
+                let totalCommits = 0;
+                pushEvents.forEach(e => {
+                    totalCommits += e.payload?.commits?.length || 0;
+                });
+                log(`Total commits in recent events: ${totalCommits}`, 'complete');
+
+                // Store in local data
+                if (!allData) allData = { users: [], data: {}, visualizations: {} };
+                if (!allData.users.includes(username)) {
+                    allData.users.push(username);
+                }
+
+                allData.data[username] = {
+                    user: {
+                        username: userData.login,
+                        avatar_url: userData.avatar_url,
+                        name: userData.name,
+                        bio: userData.bio,
+                        company: userData.company,
+                        location: userData.location,
+                        blog: userData.blog,
+                        followers: userData.followers,
+                        following: userData.following,
+                        public_repos: userData.public_repos,
+                        created_at: userData.created_at
+                    },
+                    stats: {
+                        total_commits: totalCommits,
+                        unique_repos: new Set(pushEvents.map(e => e.repo?.name)).size,
+                        years_coding: Math.floor((Date.now() - new Date(userData.created_at)) / (365.25 * 24 * 60 * 60 * 1000))
+                    },
+                    recent: pushEvents.flatMap(e =>
+                        (e.payload?.commits || []).map(c => ({
+                            sha: c.sha,
+                            date: e.created_at,
+                            repo: e.repo?.name,
+                            message: c.message
+                        }))
+                    ).slice(0, 50)
+                };
+
+                // Refresh UI
+                setupUserButtons(allData.users, allData.data);
+                selectUser(username);
+
+                log(`Fetch complete for ${username}!`, 'complete');
+                checkRateLimit();
+
+            } catch (e) {
+                log(`Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function clientFetchLoc() {
+            const progressLog = document.getElementById('clientFetchProgress');
+            const token = getApiToken();
+
+            if (!token) {
+                alert('Please set a GitHub API token first to fetch LOC data.');
+                return;
+            }
+
+            progressLog.classList.remove('hidden');
+            progressLog.innerHTML = '<p>Fetching LOC data...</p>';
+
+            const log = (msg, status = '') => {
+                const p = document.createElement('p');
+                p.textContent = msg;
+                if (status) p.className = `status-${status}`;
+                progressLog.appendChild(p);
+                progressLog.scrollTop = progressLog.scrollHeight;
+            };
+
+            // Get commits from recent data that don't have LOC
+            const commits = [];
+            Object.entries(allData?.data || {}).forEach(([username, userData]) => {
+                if (username === 'All') return;
+                (userData.recent || []).forEach(c => {
+                    if (c.sha && c.repo && c.additions === undefined) {
+                        commits.push({ ...c, username });
+                    }
+                });
+            });
+
+            if (commits.length === 0) {
+                log('No commits need LOC data', 'complete');
+                return;
+            }
+
+            log(`Found ${commits.length} commits to fetch LOC for...`);
+
+            let success = 0, errors = 0;
+            const headers = { 'Authorization': `token ${token}` };
+
+            for (let i = 0; i < Math.min(commits.length, 50); i++) {
+                const c = commits[i];
+                try {
+                    const [owner, repo] = c.repo.split('/');
+                    const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/${c.sha}`, { headers });
+
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        c.additions = data.stats?.additions || 0;
+                        c.deletions = data.stats?.deletions || 0;
+                        success++;
+                    } else {
+                        errors++;
+                    }
+                } catch (e) {
+                    errors++;
+                }
+
+                if ((i + 1) % 10 === 0) {
+                    log(`Progress: ${i + 1}/${Math.min(commits.length, 50)} (${success} success, ${errors} errors)`);
+                }
+
+                // Small delay to avoid rate limiting
+                await new Promise(r => setTimeout(r, 100));
+            }
+
+            log(`Complete! Fetched ${success} commits (${errors} errors)`, 'complete');
+            checkRateLimit();
+        }
+
+        // ==================== Data Export ====================
+        function exportData(format) {
+            if (!allData?.data) {
+                alert('No data to export');
+                return;
+            }
+
+            if (format === 'json') {
+                const blob = new Blob([JSON.stringify(allData, null, 2)], { type: 'application/json' });
+                downloadBlob(blob, 'github-stats.json');
+            } else if (format === 'csv') {
+                // Export commits as CSV
+                let csv = 'sha,username,date,repo,message,additions,deletions\n';
+                Object.entries(allData.data).forEach(([username, userData]) => {
+                    if (username === 'All') return;
+                    (userData.recent || []).forEach(c => {
+                        csv += `"${c.sha || ''}","${username}","${c.date || ''}","${c.repo || ''}","${(c.message || '').replace(/"/g, '""')}",${c.additions || ''},${c.deletions || ''}\n`;
+                    });
+                });
+                const blob = new Blob([csv], { type: 'text/csv' });
+                downloadBlob(blob, 'github-commits.csv');
+            }
+        }
+
+        async function downloadDatabase() {
+            if (!db) await initSqlDatabase();
+            if (!db) {
+                alert('Database not initialized');
+                return;
+            }
+
+            const data = db.export();
+            const blob = new Blob([data], { type: 'application/x-sqlite3' });
+            downloadBlob(blob, 'github-stats.db');
+        }
+
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
     </script>
 </body>
 </html>
