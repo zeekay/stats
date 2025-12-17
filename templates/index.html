@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GitHub Stats</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.min.js"></script>
+    <script src="https://unpkg.com/graphql@16.8.1/graphql.min.js"></script>
     <style>
         /* CSS Variables - shadcn dark theme (monochromatic) */
         :root {
@@ -577,6 +579,227 @@
         }
 
         footer a:hover { text-decoration: underline; }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 1.5rem;
+        }
+
+        .tab-btn {
+            padding: 0.75rem 1.5rem;
+            background: transparent;
+            color: var(--muted-foreground);
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 150ms ease;
+        }
+
+        .tab-btn:hover {
+            color: var(--foreground);
+            background: var(--secondary);
+        }
+
+        .tab-btn.active {
+            color: var(--foreground);
+            border-bottom-color: var(--foreground);
+        }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* Query Console */
+        .query-console {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .query-input {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .query-input textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 0.75rem;
+            background: var(--secondary);
+            color: var(--foreground);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            font-size: 0.875rem;
+            resize: vertical;
+        }
+
+        .query-input textarea:focus {
+            outline: none;
+            border-color: var(--ring);
+        }
+
+        .query-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .query-actions button {
+            padding: 0.5rem 1rem;
+            background: var(--primary);
+            color: var(--primary-foreground);
+            border: none;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .query-actions button:hover { opacity: 0.9; }
+        .query-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .query-actions .secondary-btn {
+            background: var(--secondary);
+            color: var(--secondary-foreground);
+            border: 1px solid var(--border);
+        }
+
+        .query-hint {
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+            flex: 1;
+        }
+
+        .query-results {
+            max-height: 500px;
+            overflow: auto;
+        }
+
+        .query-results table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+        }
+
+        .query-results th,
+        .query-results td {
+            padding: 0.5rem 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .query-results th {
+            background: var(--secondary);
+            font-weight: 600;
+            color: var(--muted-foreground);
+            text-transform: uppercase;
+            font-size: 0.7rem;
+            letter-spacing: 0.05em;
+            position: sticky;
+            top: 0;
+        }
+
+        .query-results tr:hover { background: var(--secondary); }
+
+        .query-error {
+            padding: 1rem;
+            color: #ef4444;
+            font-family: monospace;
+            font-size: 0.875rem;
+        }
+
+        .query-stats {
+            padding: 0.5rem 1rem;
+            background: var(--secondary);
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+            border-top: 1px solid var(--border);
+        }
+
+        /* Schema browser */
+        .schema-browser {
+            background: var(--secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .schema-browser h4 {
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .schema-table {
+            margin-bottom: 0.75rem;
+        }
+
+        .schema-table-name {
+            font-weight: 600;
+            color: var(--foreground);
+            font-size: 0.875rem;
+            cursor: pointer;
+        }
+
+        .schema-table-name:hover { text-decoration: underline; }
+
+        .schema-columns {
+            margin-left: 1rem;
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+        }
+
+        /* Example queries */
+        .example-queries {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .example-query {
+            padding: 0.25rem 0.5rem;
+            background: var(--secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 150ms ease;
+        }
+
+        .example-query:hover {
+            border-color: var(--ring);
+            background: var(--muted);
+        }
+
+        /* GraphQL specific */
+        .graphql-split {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        @media (max-width: 768px) {
+            .graphql-split {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -606,26 +829,130 @@
         <div id="error" class="error-message" style="display: none;"></div>
 
         <div id="mainContent" style="display: none;">
-            <div id="fetchStatus" class="fetch-status" style="display: none;">
-                <div class="fetch-status-info">
-                    <strong id="locCount">0</strong> of <strong id="locTotal">0</strong> commits have LOC data
-                    (<span id="locPercent">0</span>%)
-                </div>
-                <div class="fetch-status-bar">
-                    <div class="fetch-status-bar-fill" id="locBar" style="width: 0%"></div>
-                </div>
-                <div class="fetch-indicator" id="fetchIndicator" style="display: none;">
-                    <div class="pulse"></div>
-                    <span>Fetching...</span>
-                </div>
-                <button class="fetch-btn" id="fetchLocBtn" onclick="fetchMoreLoc()">Fetch More LOC</button>
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('dashboard')">Dashboard</button>
+                <button class="tab-btn" onclick="switchTab('sql')">SQL</button>
+                <button class="tab-btn" onclick="switchTab('graphql')">GraphQL</button>
             </div>
-            <div id="locProgress" class="progress-log hidden"></div>
-            <div id="userProfile" class="user-profile" style="display: none;"></div>
-            <div class="summary-row" id="summaryRow"></div>
-            <div class="stats-grid" id="statsGrid"></div>
-            <div id="yearlyStats" class="chart-container"></div>
-            <div id="chartsContainer"></div>
+
+            <!-- Dashboard Tab -->
+            <div id="tab-dashboard" class="tab-content active">
+                <div id="fetchStatus" class="fetch-status" style="display: none;">
+                    <div class="fetch-status-info">
+                        <strong id="locCount">0</strong> of <strong id="locTotal">0</strong> commits have LOC data
+                        (<span id="locPercent">0</span>%)
+                    </div>
+                    <div class="fetch-status-bar">
+                        <div class="fetch-status-bar-fill" id="locBar" style="width: 0%"></div>
+                    </div>
+                    <div class="fetch-indicator" id="fetchIndicator" style="display: none;">
+                        <div class="pulse"></div>
+                        <span>Fetching...</span>
+                    </div>
+                    <button class="fetch-btn" id="fetchLocBtn" onclick="fetchMoreLoc()">Fetch More LOC</button>
+                </div>
+                <div id="locProgress" class="progress-log hidden"></div>
+                <div id="userProfile" class="user-profile" style="display: none;"></div>
+                <div class="summary-row" id="summaryRow"></div>
+                <div class="stats-grid" id="statsGrid"></div>
+                <div id="yearlyStats" class="chart-container"></div>
+                <div id="chartsContainer"></div>
+            </div>
+
+            <!-- SQL Tab -->
+            <div id="tab-sql" class="tab-content">
+                <div class="schema-browser">
+                    <h4>Schema</h4>
+                    <div class="schema-table">
+                        <span class="schema-table-name" onclick="insertTable('users')">users</span>
+                        <div class="schema-columns">username, avatar_url, name, bio, company, location, followers, public_repos, created_at</div>
+                    </div>
+                    <div class="schema-table">
+                        <span class="schema-table-name" onclick="insertTable('commits')">commits</span>
+                        <div class="schema-columns">sha, username, date, repo, message, url, additions, deletions</div>
+                    </div>
+                    <h4 style="margin-top:1rem">Examples</h4>
+                    <div class="example-queries">
+                        <span class="example-query" onclick="runExample('top-repos')">Top repos by commits</span>
+                        <span class="example-query" onclick="runExample('yearly')">Yearly breakdown</span>
+                        <span class="example-query" onclick="runExample('biggest-days')">Biggest days</span>
+                        <span class="example-query" onclick="runExample('loc-leaders')">Most LOC added</span>
+                        <span class="example-query" onclick="runExample('recent')">Recent commits</span>
+                    </div>
+                </div>
+                <div class="query-console">
+                    <div class="query-input">
+                        <textarea id="sqlQuery" placeholder="SELECT * FROM commits LIMIT 10;">SELECT
+    repo,
+    COUNT(*) as commits,
+    SUM(additions) as added,
+    SUM(deletions) as deleted
+FROM commits
+WHERE additions IS NOT NULL
+GROUP BY repo
+ORDER BY commits DESC
+LIMIT 20;</textarea>
+                        <div class="query-actions">
+                            <button onclick="runSQL()">Run Query</button>
+                            <button class="secondary-btn" onclick="clearSQL()">Clear</button>
+                            <span class="query-hint">Ctrl+Enter to run • Database loaded in browser via sql.js</span>
+                        </div>
+                    </div>
+                    <div id="sqlResults" class="query-results"></div>
+                    <div id="sqlStats" class="query-stats"></div>
+                </div>
+            </div>
+
+            <!-- GraphQL Tab -->
+            <div id="tab-graphql" class="tab-content">
+                <div class="schema-browser">
+                    <h4>GraphQL Schema</h4>
+                    <div class="schema-columns" style="margin-left:0">
+                        <code>user(username: String!): User</code><br>
+                        <code>users: [User]</code><br>
+                        <code>commits(username: String, repo: String, limit: Int): [Commit]</code><br>
+                        <code>stats(username: String!): Stats</code><br>
+                        <code>topRepos(username: String, limit: Int, orderBy: String): [Repo]</code>
+                    </div>
+                    <h4 style="margin-top:1rem">Examples</h4>
+                    <div class="example-queries">
+                        <span class="example-query" onclick="runGqlExample('user')">Get user</span>
+                        <span class="example-query" onclick="runGqlExample('stats')">User stats</span>
+                        <span class="example-query" onclick="runGqlExample('commits')">Recent commits</span>
+                        <span class="example-query" onclick="runGqlExample('top-repos')">Top repos</span>
+                    </div>
+                </div>
+                <div class="graphql-split">
+                    <div class="query-console">
+                        <div class="query-input">
+                            <textarea id="gqlQuery" placeholder="{ users { username name } }">{
+  stats(username: "zeekay") {
+    totalCommits
+    totalAdditions
+    totalDeletions
+    netLocChange
+    yearsCoding
+    activeDays
+    uniqueRepos
+    currentStreak
+    longestStreak
+    mostProductiveDay
+  }
+}</textarea>
+                            <div class="query-actions">
+                                <button onclick="runGraphQL()">Run Query</button>
+                                <button class="secondary-btn" onclick="clearGQL()">Clear</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="query-console">
+                        <div class="query-input" style="border-bottom:none">
+                            <pre id="gqlResults" style="margin:0;min-height:120px;font-size:0.8rem;color:var(--foreground);white-space:pre-wrap">Results will appear here...</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -636,6 +963,440 @@
     <script>
         let currentUser = null;
         let allData = null;
+        let db = null; // sql.js database instance
+
+        // ==================== SQL.js Setup ====================
+        async function initSqlDatabase() {
+            if (db) return db;
+
+            try {
+                const SQL = await window.initSqlJs({
+                    locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
+                });
+
+                db = new SQL.Database();
+
+                // Create schema
+                db.run(`
+                    CREATE TABLE IF NOT EXISTS users (
+                        username TEXT PRIMARY KEY,
+                        avatar_url TEXT, name TEXT, bio TEXT,
+                        company TEXT, location TEXT, blog TEXT,
+                        followers INTEGER, following INTEGER,
+                        public_repos INTEGER, created_at TEXT
+                    );
+                    CREATE TABLE IF NOT EXISTS commits (
+                        sha TEXT PRIMARY KEY,
+                        username TEXT, date TEXT, repo TEXT,
+                        message TEXT, url TEXT,
+                        additions INTEGER, deletions INTEGER
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_commits_user ON commits(username);
+                    CREATE INDEX IF NOT EXISTS idx_commits_date ON commits(date);
+                    CREATE INDEX IF NOT EXISTS idx_commits_repo ON commits(repo);
+                `);
+
+                // Load data from allData
+                if (allData && allData.data) {
+                    Object.entries(allData.data).forEach(([username, userData]) => {
+                        if (username === 'All') return;
+
+                        // Insert user
+                        const u = userData.user;
+                        if (u) {
+                            db.run(`INSERT OR REPLACE INTO users VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+                                [u.username, u.avatar_url, u.name, u.bio, u.company, u.location, u.blog,
+                                 u.followers, u.following, u.public_repos, u.created_at]);
+                        }
+
+                        // Insert commits from daily data (aggregated)
+                        if (userData.daily) {
+                            userData.daily.forEach(d => {
+                                // Create synthetic commits from daily stats
+                                for (let i = 0; i < Math.min(d.commits, 10); i++) {
+                                    db.run(`INSERT OR IGNORE INTO commits VALUES (?,?,?,?,?,?,?,?)`,
+                                        [`${username}-${d.date}-${i}`, username, d.date, null, null, null,
+                                         Math.round(d.additions / d.commits), Math.round(d.deletions / d.commits)]);
+                                }
+                            });
+                        }
+
+                        // Insert actual recent commits
+                        if (userData.recent) {
+                            userData.recent.forEach(c => {
+                                db.run(`INSERT OR REPLACE INTO commits VALUES (?,?,?,?,?,?,?,?)`,
+                                    [c.sha, username, c.date, c.repo, c.message, null, c.additions, c.deletions]);
+                            });
+                        }
+                    });
+                }
+
+                console.log('sql.js initialized with', db.exec("SELECT COUNT(*) FROM commits")[0].values[0][0], 'commits');
+                return db;
+            } catch (e) {
+                console.error('Failed to init sql.js:', e);
+                return null;
+            }
+        }
+
+        // Tab switching
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.textContent.toLowerCase() === tabName);
+            });
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.toggle('active', content.id === `tab-${tabName}`);
+            });
+
+            if (tabName === 'sql' && !db) {
+                initSqlDatabase();
+            }
+        }
+
+        // SQL Console functions
+        async function runSQL() {
+            const query = document.getElementById('sqlQuery').value.trim();
+            const resultsDiv = document.getElementById('sqlResults');
+            const statsDiv = document.getElementById('sqlStats');
+
+            if (!query) return;
+
+            if (!db) await initSqlDatabase();
+            if (!db) {
+                resultsDiv.innerHTML = '<div class="query-error">Failed to initialize database</div>';
+                return;
+            }
+
+            const startTime = performance.now();
+            try {
+                const results = db.exec(query);
+                const elapsed = (performance.now() - startTime).toFixed(2);
+
+                if (results.length === 0) {
+                    resultsDiv.innerHTML = '<div class="query-stats" style="border:none">Query executed successfully. No results returned.</div>';
+                    statsDiv.textContent = `${elapsed}ms`;
+                    return;
+                }
+
+                const result = results[0];
+                let html = '<table><tr>';
+                result.columns.forEach(col => html += `<th>${col}</th>`);
+                html += '</tr>';
+
+                result.values.forEach(row => {
+                    html += '<tr>';
+                    row.forEach(val => {
+                        const display = val === null ? '<em>null</em>' : String(val).slice(0, 100);
+                        html += `<td title="${String(val)}">${display}</td>`;
+                    });
+                    html += '</tr>';
+                });
+                html += '</table>';
+
+                resultsDiv.innerHTML = html;
+                statsDiv.textContent = `${result.values.length} rows • ${elapsed}ms`;
+            } catch (e) {
+                resultsDiv.innerHTML = `<div class="query-error">${e.message}</div>`;
+                statsDiv.textContent = '';
+            }
+        }
+
+        function clearSQL() {
+            document.getElementById('sqlQuery').value = '';
+            document.getElementById('sqlResults').innerHTML = '';
+            document.getElementById('sqlStats').textContent = '';
+        }
+
+        function insertTable(table) {
+            document.getElementById('sqlQuery').value = `SELECT * FROM ${table} LIMIT 20;`;
+        }
+
+        const SQL_EXAMPLES = {
+            'top-repos': `SELECT repo, COUNT(*) as commits, SUM(additions) as added, SUM(deletions) as deleted
+FROM commits WHERE repo IS NOT NULL
+GROUP BY repo ORDER BY commits DESC LIMIT 15;`,
+            'yearly': `SELECT strftime('%Y', date) as year, COUNT(*) as commits,
+    SUM(additions) as added, SUM(deletions) as deleted
+FROM commits GROUP BY year ORDER BY year DESC;`,
+            'biggest-days': `SELECT date, COUNT(*) as commits, SUM(additions) as added
+FROM commits GROUP BY date ORDER BY commits DESC LIMIT 10;`,
+            'loc-leaders': `SELECT repo, SUM(additions) as total_added, SUM(deletions) as total_deleted,
+    SUM(additions) - SUM(deletions) as net
+FROM commits WHERE additions IS NOT NULL AND repo IS NOT NULL
+GROUP BY repo ORDER BY total_added DESC LIMIT 15;`,
+            'recent': `SELECT date, repo, message, additions, deletions
+FROM commits WHERE message IS NOT NULL
+ORDER BY date DESC LIMIT 20;`
+        };
+
+        function runExample(name) {
+            document.getElementById('sqlQuery').value = SQL_EXAMPLES[name] || '';
+            runSQL();
+        }
+
+        // Ctrl+Enter to run SQL
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                const sqlInput = document.getElementById('sqlQuery');
+                const gqlInput = document.getElementById('gqlQuery');
+                if (document.activeElement === sqlInput) runSQL();
+                if (document.activeElement === gqlInput) runGraphQL();
+            }
+        });
+
+        // ==================== GraphQL Setup ====================
+        const GQL_SCHEMA = `
+            type User {
+                username: String!
+                avatarUrl: String
+                name: String
+                bio: String
+                company: String
+                location: String
+                blog: String
+                followers: Int
+                following: Int
+                publicRepos: Int
+                createdAt: String
+            }
+
+            type Commit {
+                sha: String!
+                username: String!
+                date: String!
+                repo: String
+                message: String
+                additions: Int
+                deletions: Int
+            }
+
+            type Stats {
+                totalCommits: Int!
+                withLoc: Int
+                totalAdditions: Int
+                totalDeletions: Int
+                netLocChange: Int
+                firstCommit: String
+                lastCommit: String
+                activeDays: Int
+                uniqueRepos: Int
+                yearsCoding: Float
+                averageCommits: Float
+                averageLocPerCommit: Float
+                maximumCommits: Int
+                currentStreak: Int
+                longestStreak: Int
+                mostProductiveDay: String
+            }
+
+            type Repo {
+                repo: String!
+                commits: Int!
+                additions: Int
+                deletions: Int
+                firstCommit: String
+                lastCommit: String
+            }
+
+            type Query {
+                user(username: String!): User
+                users: [User]
+                commits(username: String, repo: String, limit: Int): [Commit]
+                stats(username: String!): Stats
+                topRepos(username: String, limit: Int, orderBy: String): [Repo]
+            }
+        `;
+
+        function createGraphQLResolvers() {
+            return {
+                user: ({ username }) => {
+                    const userData = allData?.data?.[username];
+                    if (!userData?.user) return null;
+                    const u = userData.user;
+                    return {
+                        username: u.username, avatarUrl: u.avatar_url, name: u.name,
+                        bio: u.bio, company: u.company, location: u.location, blog: u.blog,
+                        followers: u.followers, following: u.following,
+                        publicRepos: u.public_repos, createdAt: u.created_at
+                    };
+                },
+                users: () => {
+                    if (!allData?.data) return [];
+                    return Object.entries(allData.data)
+                        .filter(([k]) => k !== 'All')
+                        .map(([_, userData]) => {
+                            const u = userData.user;
+                            return u ? {
+                                username: u.username, avatarUrl: u.avatar_url, name: u.name,
+                                bio: u.bio, company: u.company, location: u.location, blog: u.blog,
+                                followers: u.followers, following: u.following,
+                                publicRepos: u.public_repos, createdAt: u.created_at
+                            } : null;
+                        }).filter(Boolean);
+                },
+                commits: ({ username, repo, limit = 50 }) => {
+                    if (!allData?.data) return [];
+                    let commits = [];
+                    const sources = username ? [username] : Object.keys(allData.data).filter(k => k !== 'All');
+
+                    sources.forEach(u => {
+                        const recent = allData.data[u]?.recent || [];
+                        commits.push(...recent.map(c => ({
+                            sha: c.sha, username: u, date: c.date, repo: c.repo,
+                            message: c.message, additions: c.additions, deletions: c.deletions
+                        })));
+                    });
+
+                    if (repo) commits = commits.filter(c => c.repo?.includes(repo));
+                    return commits.slice(0, limit);
+                },
+                stats: ({ username }) => {
+                    const s = allData?.data?.[username]?.stats;
+                    if (!s) return null;
+                    return {
+                        totalCommits: s.total_commits, withLoc: s.with_loc,
+                        totalAdditions: s.total_additions, totalDeletions: s.total_deletions,
+                        netLocChange: s.net_loc_change, firstCommit: s.first_commit,
+                        lastCommit: s.last_commit, activeDays: s.active_days,
+                        uniqueRepos: s.unique_repos, yearsCoding: s.years_coding,
+                        averageCommits: s.average_commits, averageLocPerCommit: s.average_loc_per_commit,
+                        maximumCommits: s.maximum_commits, currentStreak: s.current_streak,
+                        longestStreak: s.longest_streak, mostProductiveDay: s.most_productive_day
+                    };
+                },
+                topRepos: ({ username, limit = 10, orderBy = 'commits' }) => {
+                    const repos = allData?.data?.[username || Object.keys(allData.data).find(k => k !== 'All')]?.top_repos || [];
+                    return repos.slice(0, limit).map(r => ({
+                        repo: r.repo, commits: r.commits, additions: r.additions,
+                        deletions: r.deletions, firstCommit: r.first_commit, lastCommit: r.last_commit
+                    }));
+                }
+            };
+        }
+
+        async function runGraphQL() {
+            const query = document.getElementById('gqlQuery').value.trim();
+            const resultsEl = document.getElementById('gqlResults');
+
+            if (!query) return;
+
+            try {
+                // Simple GraphQL execution using the graphql.js library
+                const { graphql, buildSchema } = window.GraphQL || {};
+
+                if (!graphql) {
+                    // Fallback: parse and execute manually
+                    const result = executeGraphQLManually(query);
+                    resultsEl.textContent = JSON.stringify(result, null, 2);
+                    return;
+                }
+
+                const schema = buildSchema(GQL_SCHEMA);
+                const result = await graphql({
+                    schema,
+                    source: query,
+                    rootValue: createGraphQLResolvers()
+                });
+
+                resultsEl.textContent = JSON.stringify(result, null, 2);
+            } catch (e) {
+                resultsEl.textContent = `Error: ${e.message}`;
+            }
+        }
+
+        // Manual GraphQL execution fallback
+        function executeGraphQLManually(query) {
+            const resolvers = createGraphQLResolvers();
+            const data = {};
+
+            // Simple parser for common patterns
+            const statsMatch = query.match(/stats\s*\(\s*username:\s*"([^"]+)"\s*\)/);
+            if (statsMatch) {
+                data.stats = resolvers.stats({ username: statsMatch[1] });
+            }
+
+            const userMatch = query.match(/user\s*\(\s*username:\s*"([^"]+)"\s*\)/);
+            if (userMatch) {
+                data.user = resolvers.user({ username: userMatch[1] });
+            }
+
+            if (query.includes('users')) {
+                data.users = resolvers.users();
+            }
+
+            const commitsMatch = query.match(/commits\s*\(([^)]*)\)/);
+            if (commitsMatch || query.includes('commits')) {
+                const args = {};
+                const usernameArg = query.match(/username:\s*"([^"]+)"/);
+                const limitArg = query.match(/limit:\s*(\d+)/);
+                if (usernameArg) args.username = usernameArg[1];
+                if (limitArg) args.limit = parseInt(limitArg[1]);
+                data.commits = resolvers.commits(args);
+            }
+
+            const topReposMatch = query.match(/topRepos\s*\(([^)]*)\)/);
+            if (topReposMatch || query.includes('topRepos')) {
+                const args = {};
+                const usernameArg = query.match(/username:\s*"([^"]+)"/);
+                const limitArg = query.match(/limit:\s*(\d+)/);
+                if (usernameArg) args.username = usernameArg[1];
+                if (limitArg) args.limit = parseInt(limitArg[1]);
+                data.topRepos = resolvers.topRepos(args);
+            }
+
+            return { data };
+        }
+
+        function clearGQL() {
+            document.getElementById('gqlQuery').value = '';
+            document.getElementById('gqlResults').textContent = 'Results will appear here...';
+        }
+
+        const GQL_EXAMPLES = {
+            'user': `{
+  user(username: "zeekay") {
+    username
+    name
+    avatarUrl
+    bio
+    followers
+    publicRepos
+  }
+}`,
+            'stats': `{
+  stats(username: "zeekay") {
+    totalCommits
+    totalAdditions
+    totalDeletions
+    netLocChange
+    yearsCoding
+    currentStreak
+    longestStreak
+  }
+}`,
+            'commits': `{
+  commits(limit: 10) {
+    date
+    repo
+    message
+    additions
+    deletions
+  }
+}`,
+            'top-repos': `{
+  topRepos(limit: 5) {
+    repo
+    commits
+    additions
+    deletions
+  }
+}`
+        };
+
+        function runGqlExample(name) {
+            document.getElementById('gqlQuery').value = GQL_EXAMPLES[name] || '';
+            runGraphQL();
+        }
 
         async function initApp() {
             showLoading();

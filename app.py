@@ -1291,22 +1291,44 @@ def export_static_site(output_dir: Path):
     """Export static HTML dashboard."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     print(f'\nExporting static site to {output_dir}...')
-    
+
     all_data = {}
     all_viz = {}
-    
+    active_users = []
+
     for username in GITHUB_USERS:
         data = analyzer.get_user_data(username)
-        all_data[username] = data
-        all_viz[username] = create_visualizations(data)
-    
+        if data.get('stats') and data['stats'].get('total_commits', 0) > 0:
+            all_data[username] = data
+            all_viz[username] = create_visualizations(data)
+            active_users.append(username)
+
+    # Create combined "All" view if multiple users
+    if len(active_users) > 1:
+        print('Creating combined view...')
+        combined_stats = get_combined_stats(active_users)
+        combined_daily = get_combined_daily(active_users)
+        combined_data = {
+            'user': {'username': 'All', 'name': f'Combined ({len(active_users)} users)'},
+            'stats': combined_stats,
+            'daily': combined_daily,
+            'yearly': [{'year': k, **v} for k, v in combined_stats['yearly'].items()],
+            'top_repos': [],
+            'top_repos_loc': [],
+            'monthly': [],
+            'recent': []
+        }
+        all_data['All'] = combined_data
+        all_viz['All'] = create_visualizations(combined_data)
+        active_users.insert(0, 'All')
+
     static_data = {
         'success': True,
         'data': all_data,
         'visualizations': all_viz,
-        'users': GITHUB_USERS
+        'users': active_users
     }
     
     # Read template
@@ -1326,12 +1348,13 @@ def export_static_site(output_dir: Path):
     )
     
     # Update title
-    html = html.replace('<title>GitHub Contribution Analyzer</title>',
-                       f'<title>GitHub Stats - {" & ".join(GITHUB_USERS)}</title>')
+    user_names = [u for u in active_users if u != 'All']
+    html = html.replace('<title>GitHub Stats</title>',
+                       f'<title>GitHub Stats - {" & ".join(user_names)}</title>')
     
-    # Add footer
-    html = html.replace('</body>', 
-        f'<footer style="text-align:center;padding:2rem;color:#666;font-size:0.75rem;">Generated {datetime.now().strftime("%Y-%m-%d")} | <a href="https://github.com/zeekay/stats" style="color:#888">GitHub Stats</a></footer></body>')
+    # Update footer with generation date
+    html = html.replace('github.com/zeekay/stats</a></p>',
+        f'github.com/zeekay/stats</a> | Generated {datetime.now().strftime("%Y-%m-%d")}</p>')
     
     # Write files
     (output_dir / 'index.html').write_text(html)
