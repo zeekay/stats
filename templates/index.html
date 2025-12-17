@@ -51,28 +51,106 @@
         @media (min-width: 640px) { .container { padding: 1.5rem; } }
         @media (min-width: 1024px) { .container { padding: 2rem; } }
 
-        /* Top Header */
-        .top-header {
+        /* Profile Header - GitHub style */
+        .profile-header {
             display: flex;
-            flex-direction: column;
-            gap: 1rem;
-            align-items: center;
-            padding: 1rem 0;
+            gap: 1.5rem;
+            align-items: flex-start;
+            padding: 1.5rem 0;
+            border-bottom: 1px solid var(--border);
             margin-bottom: 1rem;
         }
 
-        @media (min-width: 768px) {
-            .top-header {
-                flex-direction: row;
-                justify-content: space-between;
-            }
+        .profile-avatar {
+            flex-shrink: 0;
+        }
+
+        .profile-avatar img {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+        }
+
+        .profile-avatar .multi-avatar {
+            display: flex;
+        }
+
+        .profile-avatar .multi-avatar img {
+            width: 80px;
+            height: 80px;
+            margin-left: -20px;
+            border: 3px solid var(--background);
+        }
+
+        .profile-avatar .multi-avatar img:first-child {
+            margin-left: 0;
+        }
+
+        .profile-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .profile-info h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .profile-info .username {
+            color: var(--muted-foreground);
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .profile-info .bio {
+            color: var(--muted-foreground);
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+            max-width: 500px;
+        }
+
+        .profile-stats-row {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .profile-stat {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            font-size: 0.875rem;
+        }
+
+        .profile-stat strong {
+            color: var(--foreground);
+        }
+
+        .profile-stat span {
+            color: var(--muted-foreground);
+        }
+
+        .profile-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            align-items: flex-end;
+        }
+
+        /* User selector pills */
+        .user-selector-row {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.5rem;
         }
 
         .user-buttons {
             display: flex;
             gap: 0.5rem;
             flex-wrap: wrap;
-            justify-content: center;
         }
 
         .user-btn {
@@ -867,19 +945,28 @@
 </head>
 <body>
     <div class="container">
-        <header class="top-header">
-            <div class="user-buttons" id="userButtons"></div>
-            <div class="add-user-form">
-                <input type="text" id="newUsername" placeholder="GitHub username" />
-                <button id="fetchUserBtn" onclick="fetchNewUser()">+ Add User</button>
+        <!-- Profile Header - GitHub style -->
+        <div id="profileHeader" class="profile-header" style="display:none">
+            <div class="profile-avatar" id="profileAvatar"></div>
+            <div class="profile-info">
+                <h1 id="profileName">Loading...</h1>
+                <div class="username" id="profileUsername"></div>
+                <div class="bio" id="profileBio"></div>
+                <div class="profile-stats-row" id="profileStatsRow"></div>
             </div>
-        </header>
+            <div class="profile-actions">
+                <div class="user-buttons" id="userButtons"></div>
+                <div class="add-user-form">
+                    <input type="text" id="newUsername" placeholder="username" />
+                    <button id="fetchUserBtn" onclick="fetchNewUser()">+ Add</button>
+                </div>
+            </div>
+        </div>
         <div id="progressLog" class="progress-log hidden"></div>
 
         <div id="loading" class="loading">
             <div class="spinner"></div>
             <p>Fetching GitHub contribution data...</p>
-            <p style="margin-top:0.5rem;opacity:0.6;">This may take a moment for initial fetch</p>
         </div>
 
         <div id="error" class="error-message" style="display: none;"></div>
@@ -887,30 +974,25 @@
         <div id="mainContent" style="display: none;">
             <!-- Tabs -->
             <div class="tabs">
-                <button class="tab-btn active" onclick="switchTab('dashboard')">Dashboard</button>
+                <button class="tab-btn active" onclick="switchTab('overview')">Overview</button>
                 <button class="tab-btn" onclick="switchTab('sql')">SQL</button>
                 <button class="tab-btn" onclick="switchTab('graphql')">GraphQL</button>
                 <button class="tab-btn" onclick="switchTab('settings')">Settings</button>
             </div>
 
-            <!-- Dashboard Tab -->
-            <div id="tab-dashboard" class="tab-content active">
+            <!-- Overview Tab (was Dashboard) -->
+            <div id="tab-overview" class="tab-content active">
                 <div id="fetchStatus" class="fetch-status" style="display: none;">
                     <div class="fetch-status-info">
-                        <strong id="locCount">0</strong> of <strong id="locTotal">0</strong> commits have LOC data
+                        <strong id="locCount">0</strong>/<strong id="locTotal">0</strong> commits with LOC
                         (<span id="locPercent">0</span>%)
                     </div>
                     <div class="fetch-status-bar">
                         <div class="fetch-status-bar-fill" id="locBar" style="width: 0%"></div>
                     </div>
-                    <div class="fetch-indicator" id="fetchIndicator" style="display: none;">
-                        <div class="pulse"></div>
-                        <span>Fetching...</span>
-                    </div>
-                    <button class="fetch-btn" id="fetchLocBtn" onclick="fetchMoreLoc()">Fetch More LOC</button>
+                    <button class="fetch-btn" id="fetchLocBtn" onclick="fetchMoreLoc()">Fetch LOC</button>
                 </div>
                 <div id="locProgress" class="progress-log hidden"></div>
-                <div id="userProfile" class="user-profile" style="display: none;"></div>
                 <div class="summary-row" id="summaryRow"></div>
                 <div class="stats-grid" id="statsGrid"></div>
                 <div id="yearlyStats" class="chart-container"></div>
@@ -1627,79 +1709,59 @@ ORDER BY date DESC LIMIT 20;`
         }
 
         function displayUserProfile(userData) {
-            const profile = document.getElementById('userProfile');
+            const header = document.getElementById('profileHeader');
+            const avatarEl = document.getElementById('profileAvatar');
+            const nameEl = document.getElementById('profileName');
+            const usernameEl = document.getElementById('profileUsername');
+            const bioEl = document.getElementById('profileBio');
+            const statsRowEl = document.getElementById('profileStatsRow');
+
             const user = userData.user;
             const stats = userData.stats || {};
 
             // Check if this is the combined "All" view
             if (user && user.username === 'All') {
-                // Get all user data for combined display
-                const usernames = allData.users.filter(u => u !== 'All');
-                let avatarsHtml = '';
-                let namesHtml = [];
+                const usernames = allData.users.filter(u => u !== 'All' && !hiddenUsers.has(u));
+                let avatarsHtml = '<div class="multi-avatar">';
                 let totalFollowers = 0;
                 let totalRepos = 0;
 
-                usernames.forEach((username, i) => {
+                usernames.forEach((username) => {
                     const ud = allData.data[username];
                     if (ud && ud.user && ud.user.avatar_url) {
-                        avatarsHtml += `<img src="${ud.user.avatar_url}" alt="${username}" style="width:80px;height:80px;border-radius:50%;border:3px solid var(--background);margin-left:${i > 0 ? '-20px' : '0'};position:relative;z-index:${10-i}">`;
-                        namesHtml.push(`<a href="https://github.com/${username}" target="_blank">@${username}</a>`);
+                        avatarsHtml += `<img src="${ud.user.avatar_url}" alt="${username}">`;
                         totalFollowers += ud.user.followers || 0;
                         totalRepos += ud.user.public_repos || 0;
                     }
                 });
+                avatarsHtml += '</div>';
 
-                profile.innerHTML = `
-                    <div style="display:flex;align-items:center">${avatarsHtml}</div>
-                    <div class="user-profile-info">
-                        <h2>Combined Stats</h2>
-                        <p>${namesHtml.join(' + ')}</p>
-                        <p style="margin-top:0.5rem;color:var(--muted-foreground)">${usernames.length} profiles combined</p>
-                        <p style="margin-top:0.75rem">
-                            <span style="margin-right:1rem">${formatNumber(totalFollowers)} followers</span>
-                            <span style="margin-right:1rem">${formatNumber(totalRepos)} public repos</span>
-                            ${stats.first_commit ? `<span>First commit: ${stats.first_commit}</span>` : ''}
-                        </p>
-                    </div>
+                avatarEl.innerHTML = avatarsHtml;
+                nameEl.textContent = 'Combined Stats';
+                usernameEl.innerHTML = usernames.map(u => `<a href="https://github.com/${u}" target="_blank" style="color:var(--muted-foreground)">@${u}</a>`).join(' + ');
+                bioEl.textContent = `${usernames.length} profiles combined`;
+                statsRowEl.innerHTML = `
+                    <div class="profile-stat"><strong>${formatNumber(totalFollowers)}</strong> <span>followers</span></div>
+                    <div class="profile-stat"><strong>${formatNumber(totalRepos)}</strong> <span>repositories</span></div>
+                    <div class="profile-stat"><strong>${formatNumber(stats.total_commits)}</strong> <span>commits</span></div>
+                    <div class="profile-stat"><strong>${stats.years_coding || 0}</strong> <span>years</span></div>
                 `;
-                profile.style.display = 'flex';
-            } else if (user && user.avatar_url) {
-                const memberSince = user.created_at ? new Date(user.created_at).getFullYear() : '';
-                const details = [];
-                if (user.location) details.push(`📍 ${user.location}`);
-                if (user.company) details.push(`🏢 ${user.company}`);
-                if (user.blog) details.push(`🔗 <a href="${user.blog.startsWith('http') ? user.blog : 'https://' + user.blog}" target="_blank">${user.blog.replace(/^https?:\/\//, '')}</a>`);
-
-                profile.innerHTML = `
-                    <img src="${user.avatar_url}" alt="${user.username}">
-                    <div class="user-profile-info">
-                        <h2>${user.name || user.username}</h2>
-                        <p>
-                            <a href="https://github.com/${user.username}" target="_blank">@${user.username}</a>
-                            ${memberSince ? `<span style="margin-left:1rem;color:var(--muted-foreground)">Member since ${memberSince}</span>` : ''}
-                        </p>
-                        ${user.bio ? `<p style="margin-top:0.5rem;color:var(--muted-foreground)">${user.bio}</p>` : ''}
-                        ${details.length ? `<p style="margin-top:0.5rem;color:var(--muted-foreground)">${details.join(' • ')}</p>` : ''}
-                        <p style="margin-top:0.75rem">
-                            <span style="margin-right:1rem">${formatNumber(user.followers || 0)} followers</span>
-                            <span style="margin-right:1rem">${formatNumber(user.public_repos || 0)} public repos</span>
-                            ${stats.first_commit ? `<span>First commit: ${stats.first_commit}</span>` : ''}
-                        </p>
-                    </div>
+            } else if (user) {
+                avatarEl.innerHTML = user.avatar_url
+                    ? `<img src="${user.avatar_url}" alt="${user.username}">`
+                    : `<div style="width:120px;height:120px;background:var(--secondary);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:2.5rem">👤</div>`;
+                nameEl.textContent = user.name || user.username;
+                usernameEl.innerHTML = `<a href="https://github.com/${user.username}" target="_blank" style="color:var(--muted-foreground)">@${user.username}</a>`;
+                bioEl.textContent = user.bio || '';
+                statsRowEl.innerHTML = `
+                    <div class="profile-stat"><strong>${formatNumber(user.followers || 0)}</strong> <span>followers</span></div>
+                    <div class="profile-stat"><strong>${formatNumber(user.following || 0)}</strong> <span>following</span></div>
+                    <div class="profile-stat"><strong>${formatNumber(user.public_repos || 0)}</strong> <span>repositories</span></div>
+                    <div class="profile-stat"><strong>${formatNumber(stats.total_commits)}</strong> <span>commits</span></div>
                 `;
-                profile.style.display = 'flex';
-            } else {
-                // Show basic profile without avatar
-                profile.innerHTML = `
-                    <div style="width:100px;height:100px;background:var(--secondary);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:2rem">👤</div>
-                    <div class="user-profile-info">
-                        <h2>${userData.stats?.total_commits ? 'GitHub User' : 'Loading...'}</h2>
-                        ${stats.first_commit ? `<p style="color:var(--muted-foreground)">Coding since ${stats.first_commit?.slice(0,4)} • ${stats.years_coding} years</p>` : ''}
-                    </div>
-                `;
-                profile.style.display = 'flex';
             }
+
+            header.style.display = 'flex';
         }
 
         function formatNumber(num) {
