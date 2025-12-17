@@ -1,0 +1,61 @@
+[project]
+name = "hanzo-stats"
+version = "0.1.0"
+description = "GitHub statistics analyzer with SQL and GraphQL interfaces"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Hanzo AI", email = "dev@hanzo.ai"}
+]
+keywords = ["github", "statistics", "analytics", "sql", "graphql", "visualization"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "flask>=3.0.0",
+    "requests>=2.31.0",
+    "pandas>=2.0.0",
+    "plotly>=5.18.0",
+    "python-dotenv>=1.0.0",
+    "python-dateutil>=2.8.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/hanzo-ai/stats"
+Repository = "https://github.com/hanzo-ai/stats"
+Documentation = "https://github.com/hanzo-ai/stats#readme"
+
+[project.scripts]
+hanzo-stats = "app:main"
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["hanzo_stats*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312']
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
