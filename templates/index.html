@@ -133,6 +133,31 @@
             border-radius: 50%;
         }
 
+        .user-btn .remove-btn {
+            margin-left: 0.25rem;
+            opacity: 0;
+            font-size: 0.7rem;
+            padding: 0.1rem 0.35rem;
+            border-radius: 50%;
+            transition: all 150ms ease;
+            color: var(--muted-foreground);
+        }
+
+        .user-btn:hover .remove-btn {
+            opacity: 0.7;
+        }
+
+        .user-btn .remove-btn:hover {
+            opacity: 1;
+            background: rgba(255,255,255,0.2);
+            color: var(--foreground);
+        }
+
+        .user-btn.combined .remove-btn,
+        .user-btn.active .remove-btn {
+            display: none;
+        }
+
         /* Add user form */
         .add-user-form {
             display: flex;
@@ -249,6 +274,31 @@
 
         .fetch-btn:hover { opacity: 0.9; }
         .fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .fetch-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+        }
+
+        .fetch-indicator.active {
+            color: var(--foreground);
+        }
+
+        .fetch-indicator .pulse {
+            width: 8px;
+            height: 8px;
+            background: var(--foreground);
+            border-radius: 50%;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.3; transform: scale(0.8); }
+            50% { opacity: 1; transform: scale(1.2); }
+        }
 
         /* User profile header */
         .user-profile {
@@ -562,6 +612,10 @@
                 <div class="fetch-status-bar">
                     <div class="fetch-status-bar-fill" id="locBar" style="width: 0%"></div>
                 </div>
+                <div class="fetch-indicator" id="fetchIndicator" style="display: none;">
+                    <div class="pulse"></div>
+                    <span>Fetching...</span>
+                </div>
                 <button class="fetch-btn" id="fetchLocBtn" onclick="fetchMoreLoc()">Fetch More LOC</button>
             </div>
             <div id="locProgress" class="progress-log hidden"></div>
@@ -601,12 +655,16 @@
             }
         }
 
+        let hiddenUsers = new Set();
+
         function setupUserButtons(users, userData) {
             const container = document.getElementById('userButtons');
             container.innerHTML = '';
             users.forEach(user => {
+                if (hiddenUsers.has(user)) return;
+
                 const btn = document.createElement('button');
-                btn.className = 'user-btn';
+                btn.className = 'user-btn' + (user === 'All' ? ' combined' : '');
                 btn.dataset.username = user;
 
                 // Add avatar if available
@@ -622,9 +680,40 @@
                 span.textContent = user;
                 btn.appendChild(span);
 
+                // Add remove button (except for "All")
+                if (user !== 'All') {
+                    const removeBtn = document.createElement('span');
+                    removeBtn.className = 'remove-btn';
+                    removeBtn.textContent = '✕';
+                    removeBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        removeUser(user);
+                    };
+                    btn.appendChild(removeBtn);
+                }
+
                 btn.onclick = () => selectUser(user);
                 container.appendChild(btn);
             });
+        }
+
+        function removeUser(username) {
+            hiddenUsers.add(username);
+            // Rebuild user list without hidden users
+            const visibleUsers = allData.users.filter(u => !hiddenUsers.has(u));
+
+            // Remove "All" if only one user left
+            if (visibleUsers.filter(u => u !== 'All').length <= 1) {
+                hiddenUsers.add('All');
+            }
+
+            setupUserButtons(allData.users, allData.data);
+
+            // Select first available user
+            const remaining = allData.users.filter(u => !hiddenUsers.has(u));
+            if (remaining.length > 0) {
+                selectUser(remaining[0]);
+            }
         }
 
         function selectUser(username) {
@@ -993,9 +1082,12 @@
         async function fetchMoreLoc() {
             const btn = document.getElementById('fetchLocBtn');
             const progressLog = document.getElementById('locProgress');
+            const indicator = document.getElementById('fetchIndicator');
 
             btn.disabled = true;
             btn.textContent = 'Fetching...';
+            indicator.style.display = 'inline-flex';
+            indicator.classList.add('active');
             progressLog.classList.remove('hidden');
             progressLog.innerHTML = '<p>Starting LOC fetch...</p>';
 
@@ -1017,6 +1109,8 @@
                         eventSource.close();
                         btn.disabled = false;
                         btn.textContent = 'Fetch More LOC';
+                        indicator.style.display = 'none';
+                        indicator.classList.remove('active');
                         // Refresh status and data
                         setTimeout(() => {
                             updateFetchStatus();
@@ -1034,6 +1128,8 @@
                     eventSource.close();
                     btn.disabled = false;
                     btn.textContent = 'Fetch More LOC';
+                    indicator.style.display = 'none';
+                    indicator.classList.remove('active');
                     const p = document.createElement('p');
                     p.textContent = 'Connection lost';
                     p.className = 'status-error';
@@ -1042,6 +1138,8 @@
             } catch (error) {
                 btn.disabled = false;
                 btn.textContent = 'Fetch More LOC';
+                indicator.style.display = 'none';
+                indicator.classList.remove('active');
                 const p = document.createElement('p');
                 p.textContent = 'Error: ' + error.message;
                 p.className = 'status-error';
