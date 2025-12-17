@@ -44,3 +44,9 @@ simple_test.py
 *.old
 app_simple.py
 app_working.py
+
+# Playwright temp
+.playwright-mcp/
+
+# Extra database files
+github_stats.db

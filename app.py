@@ -842,10 +842,168 @@ def create_visualizations(data: dict) -> dict:
 analyzer = GitHubStatsAnalyzer()
 
 
+def init_default_users():
+    """Fetch data for default users on startup if they don't have data."""
+    for username in GITHUB_USERS:
+        stats = analyzer.db.get_stats(username)
+        if stats.get('total_commits', 0) == 0:
+            print(f'\nInitializing data for {username}...')
+            # Fetch user profile
+            user_data = GitHubAPI.get_user_profile(username)
+            if user_data:
+                analyzer.db.save_user(user_data)
+                print(f'  Saved profile for {user_data.get("name", username)}')
+            # Fetch commits
+            analyzer.fetch_all_commits(username)
+            # Fetch some LOC data
+            analyzer.fetch_loc_batch(username, 100)
+        else:
+            # Check if user profile exists
+            user = analyzer.db.get_user(username)
+            if not user:
+                print(f'\nFetching profile for {username}...')
+                user_data = GitHubAPI.get_user_profile(username)
+                if user_data:
+                    analyzer.db.save_user(user_data)
+                    print(f'  Saved profile for {user_data.get("name", username)}')
+
+
+# Run initialization in background thread on startup
+import threading
+init_thread = threading.Thread(target=init_default_users, daemon=True)
+init_thread.start()
+
+
 # Flask routes
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+def get_combined_stats(usernames: list) -> dict:
+    """Get combined stats across multiple users."""
+    conn = analyzer.db._get_conn()
+
+    # Combined totals
+    placeholders = ','.join(['?' for _ in usernames])
+    total = conn.execute(f'SELECT COUNT(*) FROM commits WHERE username IN ({placeholders})', usernames).fetchone()[0]
+    with_loc = conn.execute(f'SELECT COUNT(*) FROM commits WHERE username IN ({placeholders}) AND additions IS NOT NULL', usernames).fetchone()[0]
+
+    totals = conn.execute(f'''
+        SELECT COALESCE(SUM(additions), 0) as total_additions, COALESCE(SUM(deletions), 0) as total_deletions
+        FROM commits WHERE username IN ({placeholders})
+    ''', usernames).fetchone()
+
+    dates = conn.execute(f'SELECT MIN(date) as first, MAX(date) as last FROM commits WHERE username IN ({placeholders})', usernames).fetchone()
+    active_days = conn.execute(f'SELECT COUNT(DISTINCT date) FROM commits WHERE username IN ({placeholders})', usernames).fetchone()[0]
+    unique_repos = conn.execute(f'SELECT COUNT(DISTINCT repo) FROM commits WHERE username IN ({placeholders})', usernames).fetchone()[0]
+
+    # Max commits in a day
+    max_day = conn.execute(f'''
+        SELECT date, COUNT(*) as cnt FROM commits
+        WHERE username IN ({placeholders}) GROUP BY date ORDER BY cnt DESC LIMIT 1
+    ''', usernames).fetchone()
+
+    # Day of week analysis
+    dow_stats = conn.execute(f'''
+        SELECT
+            CASE CAST(strftime('%w', date) AS INTEGER)
+                WHEN 0 THEN 'Sunday' WHEN 1 THEN 'Monday' WHEN 2 THEN 'Tuesday'
+                WHEN 3 THEN 'Wednesday' WHEN 4 THEN 'Thursday' WHEN 5 THEN 'Friday' WHEN 6 THEN 'Saturday'
+            END as day, COUNT(*) as commits
+        FROM commits WHERE username IN ({placeholders})
+        GROUP BY strftime('%w', date) ORDER BY commits DESC
+    ''', usernames).fetchall()
+
+    # Average LOC per commit
+    avg_loc = conn.execute(f'''
+        SELECT AVG(additions + deletions) FROM commits
+        WHERE username IN ({placeholders}) AND additions IS NOT NULL
+    ''', usernames).fetchone()[0] or 0
+
+    # Streak calculation
+    all_dates = [r[0] for r in conn.execute(
+        f'SELECT DISTINCT date FROM commits WHERE username IN ({placeholders}) ORDER BY date', usernames
+    ).fetchall()]
+
+    current_streak = 0
+    longest_streak = 0
+    if all_dates:
+        today = datetime.now().strftime('%Y-%m-%d')
+        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+        if all_dates[-1] == today or all_dates[-1] == yesterday:
+            current_streak = 1
+            for i in range(len(all_dates) - 2, -1, -1):
+                d1 = datetime.strptime(all_dates[i], '%Y-%m-%d')
+                d2 = datetime.strptime(all_dates[i + 1], '%Y-%m-%d')
+                if (d2 - d1).days == 1:
+                    current_streak += 1
+                else:
+                    break
+
+        streak = 1
+        for i in range(1, len(all_dates)):
+            d1 = datetime.strptime(all_dates[i - 1], '%Y-%m-%d')
+            d2 = datetime.strptime(all_dates[i], '%Y-%m-%d')
+            if (d2 - d1).days == 1:
+                streak += 1
+            else:
+                longest_streak = max(longest_streak, streak)
+                streak = 1
+        longest_streak = max(longest_streak, streak)
+
+    # Yearly breakdown
+    yearly = {}
+    yearly_rows = conn.execute(f'''
+        SELECT strftime('%Y', date) as year, COUNT(*) as commits,
+            COALESCE(SUM(additions), 0) as additions, COALESCE(SUM(deletions), 0) as deletions,
+            COUNT(DISTINCT date) as days_active
+        FROM commits WHERE username IN ({placeholders})
+        GROUP BY strftime('%Y', date) ORDER BY year
+    ''', usernames).fetchall()
+    for row in yearly_rows:
+        yearly[row['year']] = {
+            'commits': row['commits'], 'additions': row['additions'], 'deletions': row['deletions'],
+            'net_loc': row['additions'] - row['deletions'], 'days_active': row['days_active']
+        }
+
+    conn.close()
+
+    first_date = datetime.strptime(dates['first'], '%Y-%m-%d') if dates['first'] else datetime.now()
+    total_days = (datetime.strptime(dates['last'], '%Y-%m-%d') - first_date).days + 1 if dates['first'] else 0
+    years_coding = (datetime.now() - first_date).days / 365.25 if dates['first'] else 0
+
+    return {
+        'total_commits': total, 'with_loc': with_loc, 'missing_loc': total - with_loc,
+        'total_additions': totals['total_additions'], 'total_deletions': totals['total_deletions'],
+        'net_loc_change': totals['total_additions'] - totals['total_deletions'],
+        'first_commit': dates['first'], 'last_commit': dates['last'],
+        'total_days': total_days, 'active_days': active_days, 'unique_repos': unique_repos,
+        'years_coding': round(years_coding, 1), 'average_commits': round(total / max(active_days, 1), 1),
+        'average_loc_per_commit': round(avg_loc, 0),
+        'maximum_commits': max_day['cnt'] if max_day else 0,
+        'max_commit_date': max_day['date'] if max_day else None,
+        'current_streak': current_streak,
+        'longest_streak': longest_streak,
+        'most_productive_day': dow_stats[0]['day'] if dow_stats else None,
+        'day_of_week_stats': {r['day']: r['commits'] for r in dow_stats},
+        'yearly': yearly
+    }
+
+
+def get_combined_daily(usernames: list) -> list:
+    """Get combined daily stats."""
+    conn = analyzer.db._get_conn()
+    placeholders = ','.join(['?' for _ in usernames])
+    rows = conn.execute(f'''
+        SELECT date, COUNT(*) as commits, COALESCE(SUM(additions), 0) as additions,
+            COALESCE(SUM(deletions), 0) as deletions
+        FROM commits WHERE username IN ({placeholders})
+        GROUP BY date ORDER BY date
+    ''', usernames).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 @app.route('/api/data')
@@ -854,23 +1012,45 @@ def get_data():
         all_data = {}
         all_viz = {}
 
-        # Get users from database (those with data) + configured users
+        # Get users from database + configured users
         conn = analyzer.db._get_conn()
         db_users = [r[0] for r in conn.execute('SELECT username FROM users').fetchall()]
         conn.close()
 
-        # Merge with config users
-        users = list(set(GITHUB_USERS + db_users))
+        # Merge: configured users first, then any additional from DB
+        users = list(GITHUB_USERS)
+        for u in db_users:
+            if u not in users:
+                users.append(u)
 
+        active_users = []
         for username in users:
             print(f'Loading data for {username}...')
             data = analyzer.get_user_data(username, fetch=False)
-            # Only include users with actual data
             if data.get('stats') and data['stats'].get('total_commits', 0) > 0:
                 all_data[username] = data
                 all_viz[username] = create_visualizations(data)
+                active_users.append(username)
 
-        active_users = list(all_data.keys())
+        # Create combined "All" view if multiple users
+        if len(active_users) > 1:
+            print('Creating combined view...')
+            combined_stats = get_combined_stats(active_users)
+            combined_daily = get_combined_daily(active_users)
+            combined_data = {
+                'user': {'username': 'All', 'name': f'Combined ({len(active_users)} users)'},
+                'stats': combined_stats,
+                'daily': combined_daily,
+                'yearly': [{'year': k, **v} for k, v in combined_stats['yearly'].items()],
+                'top_repos': [],
+                'top_repos_loc': [],
+                'monthly': [],
+                'recent': []
+            }
+            all_data['All'] = combined_data
+            all_viz['All'] = create_visualizations(combined_data)
+            active_users.insert(0, 'All')  # Put "All" first
+
         return jsonify({
             'success': True,
             'data': all_data,
@@ -949,81 +1129,159 @@ def list_users():
 
 @app.route('/api/fetch/<username>')
 def fetch_user(username):
-    """Fetch all data for a new user."""
+    """Fetch all data for a new user with live progress streaming."""
     from flask import Response
 
     def generate():
         yield f'data: {{"status": "starting", "message": "Fetching profile for {username}..."}}\n\n'
 
         # Fetch user profile
-        user_data = analyzer.api.get_user(username)
+        user_data = GitHubAPI.get_user_profile(username)
         if not user_data:
             yield f'data: {{"status": "error", "message": "User {username} not found"}}\n\n'
             return
 
         # Save user
         analyzer.db.save_user(user_data)
-        yield f'data: {{"status": "progress", "message": "Profile saved: {user_data.get("name", username)}"}}\n\n'
+        name = user_data.get("name", username)
+        yield f'data: {{"status": "progress", "message": "Profile saved: {name}"}}\n\n'
 
-        # Fetch commits via search
+        # Fetch commits
         yield f'data: {{"status": "progress", "message": "Fetching commits since {START_DATE}..."}}\n\n'
 
-        # Get contribution calendar first
-        calendar = analyzer.api.get_contribution_calendar(username)
-        total_days = len(calendar) if calendar else 0
-        yield f'data: {{"status": "progress", "message": "Got {total_days} days of calendar data"}}\n\n'
-
-        # Determine which months to fetch
-        last_fetch = analyzer.db.get_fetch_meta(username, 'commits')
-        if last_fetch:
-            start_month = datetime.strptime(last_fetch, '%Y-%m')
-        else:
-            start_month = datetime.strptime(START_DATE[:7], '%Y-%m')
-
-        current = datetime.now()
-        months = []
-        m = start_month
-        while m <= current:
-            months.append(m.strftime('%Y-%m'))
-            if m.month == 12:
-                m = m.replace(year=m.year + 1, month=1)
-            else:
-                m = m.replace(month=m.month + 1)
-
-        yield f'data: {{"status": "progress", "message": "{len(months)} months to fetch"}}\n\n'
-
-        # Fetch each month
+        end_date = datetime.now().date()
+        current = START_DATE
         total_commits = 0
-        for month in months:
-            yield f'data: {{"status": "progress", "message": "Fetching {month}..."}}\n\n'
 
-            start = f'{month}-01'
-            if month[5:] == '12':
-                end = f'{int(month[:4]) + 1}-01-01'
+        while current <= end_date:
+            year, month = current.year, current.month
+            yield f'data: {{"status": "progress", "message": "Fetching {year}-{month:02d}..."}}\n\n'
+
+            commits = analyzer.fetch_commits_for_month(username, year, month)
+            saved = analyzer.db.save_commits(commits)
+            total_commits += len(commits)
+            yield f'data: {{"status": "progress", "message": "  Found {len(commits)} commits"}}\n\n'
+
+            analyzer.db.mark_month_fetched(username, year, month)
+
+            if month == 12:
+                current = date(year + 1, 1, 1)
             else:
-                end = f'{month[:5]}{int(month[5:]) + 1:02d}-01'
+                current = date(year, month + 1, 1)
 
-            commits = analyzer.api.search_commits(username, start, end)
-            if commits:
-                saved = analyzer.db.save_commits(username, commits)
-                total_commits += len(commits)
-                yield f'data: {{"status": "progress", "message": "  Found {len(commits)} commits, saved {saved} new"}}\n\n'
-
-            # Update fetch meta
-            analyzer.db.set_fetch_meta(username, 'commits', month)
-
-        # Get total cached commits
         stats = analyzer.db.get_stats(username)
         total = stats.get('total_commits', 0)
-        yield f'data: {{"status": "progress", "message": "Total cached commits: {total}"}}\n\n'
+        yield f'data: {{"status": "progress", "message": "Total commits: {total}"}}\n\n'
 
         # Fetch some LOC data
-        yield f'data: {{"status": "progress", "message": "Fetching LOC data (batch of 200)..."}}\n\n'
-        fetched = analyzer.fetch_loc_batch(username, 200)
+        yield f'data: {{"status": "progress", "message": "Fetching LOC data..."}}\n\n'
+        fetched = analyzer.fetch_loc_batch(username, 100)
         yield f'data: {{"status": "progress", "message": "Fetched LOC for {fetched} commits"}}\n\n'
 
-        # Done
         yield f'data: {{"status": "complete", "message": "Fetch complete for {username}"}}\n\n'
+
+    return Response(generate(), mimetype='text/event-stream',
+                   headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
+@app.route('/api/fetch-status')
+def fetch_status():
+    """Get current fetch status showing what data exists vs needs fetching."""
+    conn = analyzer.db._get_conn()
+
+    status = {}
+    for username in GITHUB_USERS:
+        total = conn.execute('SELECT COUNT(*) FROM commits WHERE username = ?', (username,)).fetchone()[0]
+        with_loc = conn.execute('SELECT COUNT(*) FROM commits WHERE username = ? AND additions IS NOT NULL', (username,)).fetchone()[0]
+        without_loc = total - with_loc
+
+        # LOC totals
+        totals = conn.execute('''
+            SELECT COALESCE(SUM(additions), 0) as adds, COALESCE(SUM(deletions), 0) as dels
+            FROM commits WHERE username = ? AND additions IS NOT NULL
+        ''', (username,)).fetchone()
+
+        status[username] = {
+            'total_commits': total,
+            'with_loc': with_loc,
+            'without_loc': without_loc,
+            'loc_percent': round(100 * with_loc / max(total, 1), 1),
+            'total_additions': totals['adds'],
+            'total_deletions': totals['dels'],
+            'net_loc': totals['adds'] - totals['dels']
+        }
+
+    # Combined stats
+    total = conn.execute('SELECT COUNT(*) FROM commits').fetchone()[0]
+    with_loc = conn.execute('SELECT COUNT(*) FROM commits WHERE additions IS NOT NULL').fetchone()[0]
+    totals = conn.execute('SELECT COALESCE(SUM(additions), 0), COALESCE(SUM(deletions), 0) FROM commits WHERE additions IS NOT NULL').fetchone()
+
+    status['_combined'] = {
+        'total_commits': total,
+        'with_loc': with_loc,
+        'without_loc': total - with_loc,
+        'loc_percent': round(100 * with_loc / max(total, 1), 1),
+        'total_additions': totals[0],
+        'total_deletions': totals[1],
+        'net_loc': totals[0] - totals[1]
+    }
+
+    conn.close()
+    return jsonify({'success': True, 'status': status})
+
+
+@app.route('/api/fetch-loc-stream')
+def fetch_loc_stream():
+    """Stream LOC fetch progress."""
+    from flask import Response
+
+    def generate():
+        conn = analyzer.db._get_conn()
+
+        # Get commits needing LOC
+        rows = conn.execute('''
+            SELECT sha, repo FROM commits
+            WHERE additions IS NULL
+            ORDER BY date DESC
+            LIMIT 500
+        ''').fetchall()
+        conn.close()
+
+        total = len(rows)
+        yield f'data: {{"status": "starting", "total": {total}}}\n\n'
+
+        success = 0
+        errors = 0
+
+        for i, row in enumerate(rows):
+            sha, repo = row['sha'], row['repo']
+
+            try:
+                resp = requests.get(
+                    f'https://api.github.com/repos/{repo}/commits/{sha}',
+                    headers=REST_HEADERS, timeout=10
+                )
+                if resp.status_code == 200:
+                    stats = resp.json().get('stats', {})
+                    adds = stats.get('additions', 0)
+                    dels = stats.get('deletions', 0)
+
+                    conn = analyzer.db._get_conn()
+                    conn.execute('UPDATE commits SET additions=?, deletions=? WHERE sha=?', (adds, dels, sha))
+                    conn.commit()
+                    conn.close()
+                    success += 1
+                else:
+                    errors += 1
+            except:
+                errors += 1
+
+            if (i + 1) % 20 == 0:
+                yield f'data: {{"status": "progress", "processed": {i+1}, "total": {total}, "success": {success}, "errors": {errors}}}\n\n'
+
+            time.sleep(0.1)  # Rate limit
+
+        yield f'data: {{"status": "complete", "success": {success}, "errors": {errors}}}\n\n'
 
     return Response(generate(), mimetype='text/event-stream',
                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})

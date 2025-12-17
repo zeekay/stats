@@ -204,6 +204,52 @@
         .progress-log p.status-complete { color: var(--foreground); }
         .progress-log p.status-error { color: #ef4444; }
 
+        /* Fetch status bar */
+        .fetch-status {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem 1rem;
+            background: var(--secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 1rem;
+            font-size: 0.8rem;
+        }
+
+        .fetch-status-info {
+            flex: 1;
+        }
+
+        .fetch-status-bar {
+            width: 100px;
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .fetch-status-bar-fill {
+            height: 100%;
+            background: var(--foreground);
+            transition: width 0.3s ease;
+        }
+
+        .fetch-btn {
+            padding: 0.4rem 0.75rem;
+            background: var(--primary);
+            color: var(--primary-foreground);
+            border: none;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .fetch-btn:hover { opacity: 0.9; }
+        .fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
         /* User profile header */
         .user-profile {
             display: flex;
@@ -508,6 +554,17 @@
         <div id="error" class="error-message" style="display: none;"></div>
 
         <div id="mainContent" style="display: none;">
+            <div id="fetchStatus" class="fetch-status" style="display: none;">
+                <div class="fetch-status-info">
+                    <strong id="locCount">0</strong> of <strong id="locTotal">0</strong> commits have LOC data
+                    (<span id="locPercent">0</span>%)
+                </div>
+                <div class="fetch-status-bar">
+                    <div class="fetch-status-bar-fill" id="locBar" style="width: 0%"></div>
+                </div>
+                <button class="fetch-btn" id="fetchLocBtn" onclick="fetchMoreLoc()">Fetch More LOC</button>
+            </div>
+            <div id="locProgress" class="progress-log hidden"></div>
             <div id="userProfile" class="user-profile" style="display: none;"></div>
             <div class="summary-row" id="summaryRow"></div>
             <div class="stats-grid" id="statsGrid"></div>
@@ -596,7 +653,40 @@
             const user = userData.user;
             const stats = userData.stats || {};
 
-            if (user && user.avatar_url) {
+            // Check if this is the combined "All" view
+            if (user && user.username === 'All') {
+                // Get all user data for combined display
+                const usernames = allData.users.filter(u => u !== 'All');
+                let avatarsHtml = '';
+                let namesHtml = [];
+                let totalFollowers = 0;
+                let totalRepos = 0;
+
+                usernames.forEach((username, i) => {
+                    const ud = allData.data[username];
+                    if (ud && ud.user && ud.user.avatar_url) {
+                        avatarsHtml += `<img src="${ud.user.avatar_url}" alt="${username}" style="width:80px;height:80px;border-radius:50%;border:3px solid var(--background);margin-left:${i > 0 ? '-20px' : '0'};position:relative;z-index:${10-i}">`;
+                        namesHtml.push(`<a href="https://github.com/${username}" target="_blank">@${username}</a>`);
+                        totalFollowers += ud.user.followers || 0;
+                        totalRepos += ud.user.public_repos || 0;
+                    }
+                });
+
+                profile.innerHTML = `
+                    <div style="display:flex;align-items:center">${avatarsHtml}</div>
+                    <div class="user-profile-info">
+                        <h2>Combined Stats</h2>
+                        <p>${namesHtml.join(' + ')}</p>
+                        <p style="margin-top:0.5rem;color:var(--muted-foreground)">${usernames.length} profiles combined</p>
+                        <p style="margin-top:0.75rem">
+                            <span style="margin-right:1rem">${formatNumber(totalFollowers)} followers</span>
+                            <span style="margin-right:1rem">${formatNumber(totalRepos)} public repos</span>
+                            ${stats.first_commit ? `<span>First commit: ${stats.first_commit}</span>` : ''}
+                        </p>
+                    </div>
+                `;
+                profile.style.display = 'flex';
+            } else if (user && user.avatar_url) {
                 const memberSince = user.created_at ? new Date(user.created_at).getFullYear() : '';
                 const details = [];
                 if (user.location) details.push(`📍 ${user.location}`);
@@ -883,7 +973,86 @@
             document.getElementById('loading').style.display = 'none';
         }
 
-        window.addEventListener('load', initApp);
+        async function updateFetchStatus() {
+            try {
+                const response = await fetch('/api/fetch-status');
+                const data = await response.json();
+                if (data.success && data.status._combined) {
+                    const combined = data.status._combined;
+                    document.getElementById('locCount').textContent = formatNumber(combined.with_loc);
+                    document.getElementById('locTotal').textContent = formatNumber(combined.total_commits);
+                    document.getElementById('locPercent').textContent = combined.loc_percent.toFixed(1);
+                    document.getElementById('locBar').style.width = combined.loc_percent + '%';
+                    document.getElementById('fetchStatus').style.display = 'flex';
+                }
+            } catch (e) {
+                console.error('Error fetching status:', e);
+            }
+        }
+
+        async function fetchMoreLoc() {
+            const btn = document.getElementById('fetchLocBtn');
+            const progressLog = document.getElementById('locProgress');
+
+            btn.disabled = true;
+            btn.textContent = 'Fetching...';
+            progressLog.classList.remove('hidden');
+            progressLog.innerHTML = '<p>Starting LOC fetch...</p>';
+
+            try {
+                const eventSource = new EventSource('/api/fetch-loc-stream');
+
+                eventSource.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    const p = document.createElement('p');
+
+                    if (data.status === 'progress') {
+                        p.textContent = `Progress: ${data.processed}/${data.total} (${data.success} success, ${data.errors} errors)`;
+                        // Update the bar
+                        const percent = Math.round((data.processed / data.total) * 100);
+                        document.getElementById('locBar').style.width = percent + '%';
+                    } else if (data.status === 'complete') {
+                        p.textContent = `Complete! Fetched ${data.success} commits (${data.errors} errors)`;
+                        p.className = 'status-complete';
+                        eventSource.close();
+                        btn.disabled = false;
+                        btn.textContent = 'Fetch More LOC';
+                        // Refresh status and data
+                        setTimeout(() => {
+                            updateFetchStatus();
+                            initApp();
+                        }, 500);
+                    } else if (data.status === 'starting') {
+                        p.textContent = `Starting: ${data.total} commits to process`;
+                    }
+
+                    progressLog.appendChild(p);
+                    progressLog.scrollTop = progressLog.scrollHeight;
+                };
+
+                eventSource.onerror = () => {
+                    eventSource.close();
+                    btn.disabled = false;
+                    btn.textContent = 'Fetch More LOC';
+                    const p = document.createElement('p');
+                    p.textContent = 'Connection lost';
+                    p.className = 'status-error';
+                    progressLog.appendChild(p);
+                };
+            } catch (error) {
+                btn.disabled = false;
+                btn.textContent = 'Fetch More LOC';
+                const p = document.createElement('p');
+                p.textContent = 'Error: ' + error.message;
+                p.className = 'status-error';
+                progressLog.appendChild(p);
+            }
+        }
+
+        window.addEventListener('load', () => {
+            initApp();
+            updateFetchStatus();
+        });
     </script>
 </body>
 </html>
