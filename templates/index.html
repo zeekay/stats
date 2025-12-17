@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Contribution Analyzer</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            font-size: 1.1rem;
+            opacity: 0.8;
+        }
+
+        .user-selector {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .user-buttons {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .user-btn {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .user-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .user-btn.active {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            border-color: rgba(102, 126, 234, 0.5);
+        }
+
+        .stat-card.positive {
+            border-color: rgba(46, 204, 113, 0.5);
+        }
+
+        .stat-card.negative {
+            border-color: rgba(231, 76, 60, 0.5);
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-value.green { color: #2ecc71; }
+        .stat-value.red { color: #e74c3c; }
+        .stat-value.blue { color: #3498db; }
+        .stat-value.purple { color: #9b59b6; }
+
+        .stat-label {
+            font-size: 0.85rem;
+            opacity: 0.7;
+        }
+
+        .stat-change {
+            font-size: 0.75rem;
+            margin-top: 5px;
+            padding: 3px 8px;
+            border-radius: 10px;
+            display: inline-block;
+        }
+
+        .stat-change.up {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .stat-change.down {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+        }
+
+        .section-title {
+            font-size: 1.3rem;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .chart-container {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 25px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255,255,255,0.1);
+            border-radius: 50%;
+            border-top: 4px solid #667eea;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        .error-message {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .summary-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .summary-box {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .summary-box h3 {
+            font-size: 1rem;
+            opacity: 0.7;
+            margin-bottom: 15px;
+        }
+
+        .big-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+        }
+
+        .period-label {
+            font-size: 0.85rem;
+            opacity: 0.6;
+            margin-top: 5px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 1.8rem; }
+            .summary-row { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>GitHub Contribution Analyzer</h1>
+            <p class="subtitle">Real Lines of Code & Contribution Metrics</p>
+        </header>
+
+        <div class="user-selector">
+            <div class="user-buttons" id="userButtons"></div>
+        </div>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Fetching GitHub contribution data...</p>
+            <p style="opacity:0.6;margin-top:10px;">This may take a moment as we fetch real commit statistics...</p>
+        </div>
+
+        <div id="error" class="error-message" style="display: none;"></div>
+
+        <div id="mainContent" style="display: none;">
+            <div class="summary-row" id="summaryRow"></div>
+            <div id="yearlyStats" class="chart-container" style="margin-bottom:25px;"></div>
+            <div class="stats-grid" id="statsGrid"></div>
+            <div id="chartsContainer"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let allData = null;
+
+        async function initApp() {
+            showLoading();
+            try {
+                const response = await fetch('/api/data');
+                const data = await response.json();
+
+                if (data.success) {
+                    allData = data;
+                    setupUserButtons(data.users);
+                    if (data.users.length > 0) {
+                        selectUser(data.users[0]);
+                    }
+                } else {
+                    showError(data.error || 'Failed to fetch data');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+
+        function setupUserButtons(users) {
+            const container = document.getElementById('userButtons');
+            container.innerHTML = '';
+            users.forEach(user => {
+                const btn = document.createElement('button');
+                btn.className = 'user-btn';
+                btn.textContent = user;
+                btn.onclick = () => selectUser(user);
+                container.appendChild(btn);
+            });
+        }
+
+        function selectUser(username) {
+            currentUser = username;
+            document.querySelectorAll('.user-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.textContent === username);
+            });
+
+            const userData = allData.data[username];
+            if (userData) {
+                displaySummary(userData);
+                displayStats(userData);
+                displayCharts(userData, username);
+                document.getElementById('mainContent').style.display = 'block';
+                document.getElementById('loading').style.display = 'none';
+            } else {
+                showError('No data available for ' + username);
+            }
+        }
+
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toLocaleString();
+        }
+
+        function formatChange(val) {
+            const sign = val >= 0 ? '+' : '';
+            return sign + val.toFixed(1) + '%';
+        }
+
+        function displaySummary(userData) {
+            const stats = userData.stats;
+            const container = document.getElementById('summaryRow');
+
+            const netLoc = stats.net_loc_change;
+            const totalDays = stats.total_days || userData.data.length;
+
+            container.innerHTML = `
+                <div class="summary-box">
+                    <h3>TOTAL COMMITS</h3>
+                    <div class="big-number blue">${formatNumber(stats.total_commits)}</div>
+                    <div class="period-label">Since Jan 1, 2021 (${totalDays} days)</div>
+                </div>
+                <div class="summary-box">
+                    <h3>LINES ADDED</h3>
+                    <div class="big-number green">+${formatNumber(stats.total_additions)}</div>
+                    <div class="period-label">
+                        <span class="stat-change ${stats.additions_30d_change >= 0 ? 'up' : 'down'}">
+                            ${formatChange(stats.additions_30d_change)} vs prev 30d
+                        </span>
+                    </div>
+                </div>
+                <div class="summary-box">
+                    <h3>LINES DELETED</h3>
+                    <div class="big-number red">-${formatNumber(stats.total_deletions)}</div>
+                    <div class="period-label">
+                        <span class="stat-change ${stats.deletions_30d_change >= 0 ? 'up' : 'down'}">
+                            ${formatChange(stats.deletions_30d_change)} vs prev 30d
+                        </span>
+                    </div>
+                </div>
+            `;
+
+            // Display yearly stats
+            const yearlyContainer = document.getElementById('yearlyStats');
+            if (stats.yearly) {
+                const years = Object.keys(stats.yearly).sort();
+                let yearlyHtml = '<h3 class="section-title">Yearly Breakdown</h3><div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;text-align:right;">';
+                yearlyHtml += '<tr style="border-bottom:1px solid rgba(255,255,255,0.2);"><th style="text-align:left;padding:10px;">Year</th><th style="padding:10px;">Commits</th><th style="padding:10px;">Lines Added</th><th style="padding:10px;">Lines Deleted</th><th style="padding:10px;">Net LOC</th><th style="padding:10px;">Days Active</th></tr>';
+
+                years.forEach(year => {
+                    const y = stats.yearly[year];
+                    const netClass = y.net_loc >= 0 ? 'green' : 'red';
+                    yearlyHtml += `<tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
+                        <td style="text-align:left;padding:10px;font-weight:bold;">${year}</td>
+                        <td style="padding:10px;color:#3498db;">${formatNumber(y.commits)}</td>
+                        <td style="padding:10px;color:#2ecc71;">+${formatNumber(y.additions)}</td>
+                        <td style="padding:10px;color:#e74c3c;">-${formatNumber(y.deletions)}</td>
+                        <td style="padding:10px;color:${y.net_loc >= 0 ? '#2ecc71' : '#e74c3c'};">${y.net_loc >= 0 ? '+' : ''}${formatNumber(y.net_loc)}</td>
+                        <td style="padding:10px;">${y.days_active}</td>
+                    </tr>`;
+                });
+                yearlyHtml += '</table></div>';
+                yearlyContainer.innerHTML = yearlyHtml;
+            }
+        }
+
+        function displayStats(userData) {
+            const stats = userData.stats;
+            const container = document.getElementById('statsGrid');
+            
+            const netLoc = stats.net_loc_change;
+            
+            const statCards = [
+                { 
+                    label: 'Net LOC Change', 
+                    value: (netLoc >= 0 ? '+' : '') + formatNumber(netLoc),
+                    colorClass: netLoc >= 0 ? 'green' : 'red'
+                },
+                { 
+                    label: 'Avg Commits/Day', 
+                    value: stats.average_commits.toFixed(2),
+                    colorClass: 'blue'
+                },
+                { 
+                    label: 'Avg LOC/Day', 
+                    value: formatNumber(Math.round(stats.average_additions + Math.abs(stats.average_deletions || 0))),
+                    colorClass: 'purple'
+                },
+                { 
+                    label: 'Last 7 Days', 
+                    value: stats.last_7d_commits + ' commits',
+                    extra: `+${formatNumber(stats.last_7d_additions)} / -${formatNumber(stats.last_7d_deletions)}`
+                },
+                { 
+                    label: 'Last 30 Days', 
+                    value: stats.last_30d_commits + ' commits',
+                    extra: `+${formatNumber(stats.last_30d_additions)} / -${formatNumber(stats.last_30d_deletions)}`
+                },
+                { 
+                    label: 'Max Daily Commits', 
+                    value: stats.maximum_commits,
+                    colorClass: 'blue'
+                },
+                { 
+                    label: 'Max Daily Additions', 
+                    value: '+' + formatNumber(stats.maximum_additions),
+                    colorClass: 'green'
+                },
+                { 
+                    label: 'Peak Periods', 
+                    value: stats.peak_periods_count + ' days',
+                    colorClass: 'purple'
+                },
+                { 
+                    label: 'Growth Rate', 
+                    value: formatChange(stats.growth_rate),
+                    colorClass: stats.growth_rate >= 0 ? 'green' : 'red'
+                },
+                { 
+                    label: 'Contributions', 
+                    value: formatNumber(stats.total_contributions),
+                    colorClass: 'blue'
+                },
+                { 
+                    label: 'Commit Change (30d)', 
+                    value: formatChange(stats.commits_30d_change),
+                    colorClass: stats.commits_30d_change >= 0 ? 'green' : 'red'
+                },
+                { 
+                    label: 'Avg Net LOC/Day', 
+                    value: (stats.average_net_loc >= 0 ? '+' : '') + Math.round(stats.average_net_loc),
+                    colorClass: stats.average_net_loc >= 0 ? 'green' : 'red'
+                }
+            ];
+
+            container.innerHTML = statCards.map(card => `
+                <div class="stat-card ${card.cardClass || ''}">
+                    <div class="stat-value ${card.colorClass || ''}">${card.value}</div>
+                    <div class="stat-label">${card.label}</div>
+                    ${card.extra ? `<div class="stat-label" style="margin-top:5px;font-size:0.75rem;">${card.extra}</div>` : ''}
+                </div>
+            `).join('');
+        }
+
+        function displayCharts(userData, username) {
+            const container = document.getElementById('chartsContainer');
+            container.innerHTML = '';
+
+            // Contribution chart
+            const contribDiv = document.createElement('div');
+            contribDiv.className = 'chart-container';
+            contribDiv.innerHTML = '<h3 class="section-title">Contribution Growth</h3><div id="contribChart"></div>';
+            container.appendChild(contribDiv);
+
+            // LOC chart
+            const locDiv = document.createElement('div');
+            locDiv.className = 'chart-container';
+            locDiv.innerHTML = '<h3 class="section-title">Lines of Code Changes</h3><div id="locChart"></div>';
+            container.appendChild(locDiv);
+
+            // Heatmap
+            const heatDiv = document.createElement('div');
+            heatDiv.className = 'chart-container';
+            heatDiv.innerHTML = '<h3 class="section-title">Commit Patterns</h3><div id="heatmapChart"></div>';
+            container.appendChild(heatDiv);
+
+            // Plot charts
+            const viz = allData.visualizations;
+            
+            const plotConfig = {responsive: true};
+            const darkLayout = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                font: {color: '#fff'},
+                xaxis: {gridcolor: 'rgba(255,255,255,0.1)'},
+                yaxis: {gridcolor: 'rgba(255,255,255,0.1)'}
+            };
+
+            try {
+                const timeseriesData = JSON.parse(viz[`${username}_timeseries`]);
+                Object.assign(timeseriesData.layout, darkLayout);
+                Plotly.newPlot('contribChart', timeseriesData.data, timeseriesData.layout, plotConfig);
+            } catch (e) {
+                console.error('Timeseries chart error:', e);
+            }
+
+            try {
+                const locData = JSON.parse(viz[`${username}_loc`]);
+                Object.assign(locData.layout, darkLayout);
+                Plotly.newPlot('locChart', locData.data, locData.layout, plotConfig);
+            } catch (e) {
+                console.error('LOC chart error:', e);
+            }
+
+            try {
+                const heatmapData = JSON.parse(viz[`${username}_heatmap`]);
+                Object.assign(heatmapData.layout, darkLayout);
+                Plotly.newPlot('heatmapChart', heatmapData.data, heatmapData.layout, plotConfig);
+            } catch (e) {
+                console.error('Heatmap error:', e);
+            }
+        }
+
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('mainContent').style.display = 'none';
+        }
+
+        function showError(message) {
+            document.getElementById('error').textContent = message;
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('loading').style.display = 'none';
+            console.error('Error:', message);
+        }
+
+        window.addEventListener('load', initApp);
+    </script>
+</body>
+</html>
