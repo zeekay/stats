@@ -1737,7 +1737,7 @@ ORDER BY date DESC LIMIT 20;`
                 avatarsHtml += '</div>';
 
                 avatarEl.innerHTML = avatarsHtml;
-                nameEl.textContent = 'Combined Stats';
+                nameEl.textContent = 'GitHub Stats';
                 usernameEl.innerHTML = usernames.map(u => `<a href="https://github.com/${u}" target="_blank" style="color:var(--muted-foreground)">@${u}</a>`).join(' + ');
                 bioEl.textContent = `${usernames.length} profiles combined`;
                 statsRowEl.innerHTML = `
