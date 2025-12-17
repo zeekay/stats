@@ -127,6 +127,12 @@
             border-color: var(--primary);
         }
 
+        .user-btn.included {
+            background: var(--secondary);
+            border-color: var(--ring);
+            box-shadow: 0 0 0 1px var(--ring);
+        }
+
         .user-btn img {
             width: 24px;
             height: 24px;
@@ -149,7 +155,8 @@
             color: var(--foreground);
         }
 
-        .user-btn.combined .remove-btn {
+        .user-btn.combined .remove-btn,
+        .user-btn.included .remove-btn {
             display: none;
         }
 
@@ -713,8 +720,13 @@
 
         function selectUser(username) {
             currentUser = username;
+            const isAll = username === 'All';
+            const includedUsers = isAll ? allData.users.filter(u => u !== 'All') : [];
+
             document.querySelectorAll('.user-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.username === username);
+                const btnUser = btn.dataset.username;
+                btn.classList.toggle('active', btnUser === username);
+                btn.classList.toggle('included', isAll && includedUsers.includes(btnUser));
             });
 
             const userData = allData.data[username];
