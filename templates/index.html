@@ -1922,7 +1922,8 @@ ORDER BY date DESC LIMIT 20;`
                 { id: 'stalenessChart', title: 'Repo Staleness (Days Since Last Commit)', key: 'staleness' },
                 { id: 'heatmapChart', title: 'Monthly Activity Heatmap', key: 'heatmap' },
                 { id: 'yearlyCommitsChart', title: 'Yearly Commits', key: 'yearly_commits' },
-                { id: 'dayOfWeekChart', title: 'Activity by Day of Week', key: 'day_of_week' }
+                { id: 'dayOfWeekChart', title: 'Activity by Day of Week', key: 'day_of_week' },
+                { id: 'peakMonthsChart', title: 'Most Productive Months', key: 'peak_months' }
             ];
 
             // Create chart grid for some charts
@@ -2108,6 +2109,40 @@ ORDER BY date DESC LIMIT 20;`
                     }], { ...darkLayout, xaxis: { ...darkLayout.xaxis, type: 'category' } }, plotConfig);
                 }
             } catch (e) { console.error('Day of week error:', e); }
+
+            // Most Productive Months (top 15 months by commits)
+            try {
+                const peakData = db.exec(`
+                    SELECT strftime('%Y-%m', date) as month, COUNT(*) as commits
+                    FROM commits ${userFilter}
+                    GROUP BY month
+                    ORDER BY commits DESC
+                    LIMIT 15
+                `);
+                if (peakData.length > 0) {
+                    const rows = peakData[0].values;
+                    const months = rows.map(r => {
+                        const [y, m] = r[0].split('-');
+                        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                        return monthNames[parseInt(m) - 1] + ' ' + y;
+                    });
+                    const commits = rows.map(r => r[1]);
+                    const maxCommits = Math.max(...commits);
+                    Plotly.newPlot('peakMonthsChart', [{
+                        x: commits, y: months, type: 'bar', orientation: 'h',
+                        marker: {
+                            color: commits.map(c => `rgba(255, 255, 255, ${0.3 + 0.7 * (c / maxCommits)})`)
+                        },
+                        text: commits.map(c => c.toLocaleString()),
+                        textposition: 'auto'
+                    }], {
+                        ...darkLayout,
+                        xaxis: { ...darkLayout.xaxis, title: 'Commits', type: 'linear' },
+                        yaxis: { type: 'category', autorange: 'reversed' },
+                        margin: { l: 80, r: 20, t: 20, b: 40 }
+                    }, plotConfig);
+                }
+            } catch (e) { console.error('Peak months error:', e); }
 
             // Monthly Heatmap
             try {
