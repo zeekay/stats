@@ -353,6 +353,35 @@ class StatsDB:
             WHERE username = ? AND additions IS NOT NULL
         ''', (username,)).fetchone()[0] or 0
 
+        # 30-day comparison metrics
+        today = datetime.now().strftime('%Y-%m-%d')
+        thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        sixty_days_ago = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
+
+        # Last 30 days
+        last_30d = conn.execute('''
+            SELECT COALESCE(SUM(additions), 0) as adds, COALESCE(SUM(deletions), 0) as dels
+            FROM commits WHERE username = ? AND date >= ?
+        ''', (username, thirty_days_ago)).fetchone()
+
+        # Previous 30 days (30-60 days ago)
+        prev_30d = conn.execute('''
+            SELECT COALESCE(SUM(additions), 0) as adds, COALESCE(SUM(deletions), 0) as dels
+            FROM commits WHERE username = ? AND date >= ? AND date < ?
+        ''', (username, sixty_days_ago, thirty_days_ago)).fetchone()
+
+        # Calculate percentage change
+        additions_30d_change = 0
+        deletions_30d_change = 0
+        if prev_30d['adds'] > 0:
+            additions_30d_change = round(((last_30d['adds'] - prev_30d['adds']) / prev_30d['adds']) * 100, 0)
+        elif last_30d['adds'] > 0:
+            additions_30d_change = 100  # New activity
+        if prev_30d['dels'] > 0:
+            deletions_30d_change = round(((last_30d['dels'] - prev_30d['dels']) / prev_30d['dels']) * 100, 0)
+        elif last_30d['dels'] > 0:
+            deletions_30d_change = 100
+
         conn.close()
 
         # Calculate derived stats
@@ -383,12 +412,9 @@ class StatsDB:
             'most_productive_day': dow_stats[0]['day'] if dow_stats else None,
             'day_of_week_stats': {r['day']: r['commits'] for r in dow_stats},
             'yearly': yearly,
-            # Calculated metrics for display
-            'last_7d_commits': 0,  # Will calculate below
-            'last_30d_commits': 0,
-            'additions_30d_change': 0,
-            'deletions_30d_change': 0,
-            'growth_rate': 0
+            # 30-day comparison metrics
+            'additions_30d_change': additions_30d_change,
+            'deletions_30d_change': deletions_30d_change,
         }
     
     def get_daily_stats(self, username: str, since: str = None) -> list:
