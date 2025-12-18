@@ -1881,7 +1881,7 @@ ORDER BY date DESC LIMIT 20;`
             `).join('');
         }
 
-        function displayCharts(userData, userViz, username) {
+        async function displayCharts(userData, userViz, username) {
             const container = document.getElementById('chartsContainer');
             container.innerHTML = '';
 
