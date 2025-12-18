@@ -213,7 +213,8 @@
         }
 
         .user-btn.disabled {
-            opacity: 0.4;
+            opacity: 0.7;
+            filter: grayscale(50%);
         }
 
         /* Add user form */
@@ -1120,17 +1121,6 @@
 
             <!-- Overview Tab (was Dashboard) -->
             <div id="tab-overview" class="tab-content active">
-                <div id="fetchStatus" class="fetch-status" style="display: none;">
-                    <div class="fetch-status-info">
-                        <strong id="locCount">0</strong>/<strong id="locTotal">0</strong> commits with LOC
-                        (<span id="locPercent">0</span>%)
-                    </div>
-                    <div class="fetch-status-bar">
-                        <div class="fetch-status-bar-fill" id="locBar" style="width: 0%"></div>
-                    </div>
-                    <button class="fetch-btn" id="fetchLocBtn" onclick="fetchMoreLoc()">Fetch LOC</button>
-                </div>
-                <div id="locProgress" class="progress-log hidden"></div>
                 <div class="summary-row" id="summaryRow"></div>
                 <div class="stats-grid" id="statsGrid"></div>
                 <div id="yearlyStats" class="chart-container"></div>
@@ -1279,6 +1269,21 @@ LIMIT 20;</textarea>
                             <button onclick="clientFetchLoc()" class="secondary-btn">Fetch More LOC</button>
                         </div>
                         <p class="hint">Fetches contribution data directly via GitHub API using your token.</p>
+                    </div>
+
+                    <div class="settings-group">
+                        <label>LOC Fetch Status</label>
+                        <div id="fetchStatus" class="fetch-status" style="display: none;">
+                            <div class="fetch-status-info">
+                                <strong id="locCount">0</strong>/<strong id="locTotal">0</strong> commits with LOC
+                                (<span id="locPercent">0</span>%)
+                            </div>
+                            <div class="fetch-status-bar">
+                                <div class="fetch-status-bar-fill" id="locBar" style="width: 0%"></div>
+                            </div>
+                            <button class="fetch-btn" id="fetchLocBtn" onclick="fetchMoreLoc()">Fetch LOC</button>
+                        </div>
+                        <div id="locProgress" class="progress-log hidden"></div>
                     </div>
 
                     <div id="clientFetchProgress" class="progress-log hidden"></div>
