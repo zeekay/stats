@@ -202,22 +202,22 @@
         .user-btn .remove-btn {
             margin-left: 0.5rem;
             font-size: 0.75rem;
-            padding: 0.15rem 0.4rem;
+            padding: 0.2rem 0.5rem;
             border-radius: 50%;
             transition: all 150ms ease;
-            color: var(--muted-foreground);
-            opacity: 0.5;
+            color: rgba(255,255,255,0.6);
+            background: rgba(0,0,0,0.2);
+            display: inline-block;
         }
 
         .user-btn .remove-btn:hover {
-            opacity: 1;
-            background: rgba(255,255,255,0.2);
-            color: var(--foreground);
+            color: #fff;
+            background: rgba(255,0,0,0.6);
         }
 
-        /* Always show remove button */
-        .user-btn .remove-btn {
-            display: inline-block;
+        .user-btn.disabled .remove-btn {
+            color: rgba(255,255,255,0.4);
+            background: rgba(0,0,0,0.15);
         }
 
         .user-btn.disabled {
@@ -1311,7 +1311,14 @@ LIMIT 20;</textarea>
     </div>
 
     <footer>
-        <p>Built with <a href="https://github.com/zeekay/stats" target="_blank">github.com/zeekay/stats</a></p>
+        <p>
+            <a href="https://github.com/zeekay/stats" target="_blank">⭐ Star</a> ·
+            <a href="https://github.com/zeekay/stats/fork" target="_blank">🍴 Fork</a> ·
+            <a href="https://github.com/zeekay/stats" target="_blank">github.com/zeekay/stats</a>
+        </p>
+        <p style="font-size:0.75rem;color:var(--muted-foreground);margin-top:0.5rem">
+            Configure users in <code>stats.json</code> and deploy your own stats dashboard
+        </p>
     </footer>
 
     <script>

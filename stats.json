@@ -1,0 +1,7 @@
+{
+  "users": ["zeekay", "hanzo-dev"],
+  "since": "2010-01-01",
+  "title": "GitHub Stats",
+  "database": "cache/stats.db",
+  "port": 5001
+}

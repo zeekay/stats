@@ -30,14 +30,22 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Configuration
+# Load config from stats.json if exists, fallback to env vars
+CONFIG_PATH = Path('stats.json')
+config = {}
+if CONFIG_PATH.exists():
+    with open(CONFIG_PATH) as f:
+        config = json.load(f)
+
+# Configuration (stats.json takes precedence over env vars)
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
-GITHUB_USERS = [user.strip() for user in os.getenv('GITHUB_USERS', 'zeekay').split(',')]
+GITHUB_USERS = config.get('users') or [user.strip() for user in os.getenv('GITHUB_USERS', 'zeekay').split(',')]
 DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
-PORT = int(os.getenv('PORT', '5001'))
-START_DATE = datetime.strptime(os.getenv('START_DATE', '2021-01-01'), '%Y-%m-%d').date()
-DB_PATH = Path(os.getenv('DB_PATH', './cache/stats.db'))
+PORT = config.get('port') or int(os.getenv('PORT', '5001'))
+START_DATE = datetime.strptime(config.get('since') or os.getenv('START_DATE', '2021-01-01'), '%Y-%m-%d').date()
+DB_PATH = Path(config.get('database') or os.getenv('DB_PATH', './cache/stats.db'))
 REQUEST_DELAY = float(os.getenv('REQUEST_DELAY', '0.1'))
+APP_TITLE = config.get('title', 'GitHub Stats')
 
 # API Headers
 HEADERS = {'Authorization': f'bearer {GITHUB_TOKEN}', 'Accept': 'application/vnd.github.v3+json'}
