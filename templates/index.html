@@ -855,22 +855,31 @@
         @media (max-width: 640px) {
             .container { padding: 0.75rem; }
 
-            /* Header stack vertically */
-            .header-row {
+            /* Profile header stack vertically on mobile */
+            .profile-header {
                 flex-direction: column;
-                align-items: flex-start;
+                align-items: center;
+                text-align: center;
                 gap: 1rem;
             }
 
-            .header-row > div:first-child {
+            .profile-info {
+                display: flex;
                 flex-direction: column;
                 align-items: center;
-                width: 100%;
-                text-align: center;
             }
 
-            .header-row .avatar-stack {
+            .profile-info h1 {
+                font-size: 1.25rem;
+            }
+
+            .profile-stats-row {
                 justify-content: center;
+            }
+
+            .profile-actions {
+                width: 100%;
+                align-items: center;
             }
 
             /* User buttons wrap */
@@ -882,7 +891,16 @@
 
             .user-btn {
                 padding: 0.4rem 0.6rem;
-                font-size: 0.7rem;
+                font-size: 0.75rem;
+            }
+
+            .add-user-form {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .add-user-form input {
+                width: 120px;
             }
 
             /* Stats grid 2 columns on mobile */
