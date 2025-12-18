@@ -1,0 +1,46 @@
+{
+  "charts": [
+    {
+      "id": "commitsOverTime",
+      "title": "Commits Over Time",
+      "type": "bar",
+      "sql": "SELECT strftime('%Y-%m', date) as month, COUNT(*) as commits FROM commits ${userFilter} GROUP BY month ORDER BY month",
+      "x": "month",
+      "y": "commits"
+    },
+    {
+      "id": "locOverTime",
+      "title": "Lines of Code Over Time", 
+      "type": "scatter",
+      "sql": "SELECT strftime('%Y-%m', date) as month, SUM(additions) as additions, SUM(deletions) as deletions FROM commits ${userFilter} WHERE additions IS NOT NULL GROUP BY month ORDER BY month",
+      "x": "month",
+      "y": ["additions", "deletions"]
+    },
+    {
+      "id": "topRepos",
+      "title": "Top Repositories",
+      "type": "bar",
+      "sql": "SELECT repo, COUNT(*) as commits FROM commits ${userFilter} GROUP BY repo ORDER BY commits DESC LIMIT 15",
+      "x": "repo",
+      "y": "commits",
+      "orientation": "h"
+    },
+    {
+      "id": "dayOfWeek",
+      "title": "Commits by Day of Week",
+      "type": "bar",
+      "sql": "SELECT CASE strftime('%w', date) WHEN '0' THEN 'Sun' WHEN '1' THEN 'Mon' WHEN '2' THEN 'Tue' WHEN '3' THEN 'Wed' WHEN '4' THEN 'Thu' WHEN '5' THEN 'Fri' WHEN '6' THEN 'Sat' END as day, COUNT(*) as commits FROM commits ${userFilter} GROUP BY strftime('%w', date) ORDER BY strftime('%w', date)",
+      "x": "day",
+      "y": "commits"
+    },
+    {
+      "id": "hourOfDay",
+      "title": "Commits by Hour",
+      "type": "bar",
+      "sql": "SELECT strftime('%H', datetime) as hour, COUNT(*) as commits FROM commits ${userFilter} WHERE datetime IS NOT NULL GROUP BY hour ORDER BY hour",
+      "x": "hour",
+      "y": "commits"
+    }
+  ],
+  "customCharts": []
+}
