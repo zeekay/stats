@@ -207,9 +207,13 @@
             color: var(--foreground);
         }
 
-        .user-btn.combined .remove-btn,
-        .user-btn.included .remove-btn {
-            display: none;
+        /* Always show remove button */
+        .user-btn .remove-btn {
+            display: inline-block;
+        }
+
+        .user-btn.disabled {
+            opacity: 0.4;
         }
 
         /* Add user form */
@@ -1777,16 +1781,23 @@ ORDER BY date DESC LIMIT 20;`
             }
         }
 
-        let hiddenUsers = new Set();
+        let enabledUsers = new Set();  // Track which users are enabled for view
 
         function setupUserButtons(users, userData) {
             const container = document.getElementById('userButtons');
             container.innerHTML = '';
+
+            // Initialize enabledUsers if empty
+            if (enabledUsers.size === 0) {
+                users.filter(u => u !== 'All').forEach(u => enabledUsers.add(u));
+            }
+
             users.forEach(user => {
-                if (hiddenUsers.has(user)) return;
+                if (user === 'All') return;  // Don't show "All" button anymore
 
                 const btn = document.createElement('button');
-                btn.className = 'user-btn' + (user === 'All' ? ' combined' : '');
+                const isEnabled = enabledUsers.has(user);
+                btn.className = 'user-btn' + (isEnabled ? ' active' : ' disabled');
                 btn.dataset.username = user;
 
                 // Add avatar if available
@@ -1802,66 +1813,83 @@ ORDER BY date DESC LIMIT 20;`
                 span.textContent = user;
                 btn.appendChild(span);
 
-                // Add remove button (except for "All")
-                if (user !== 'All') {
-                    const removeBtn = document.createElement('span');
-                    removeBtn.className = 'remove-btn';
-                    removeBtn.textContent = '✕';
-                    removeBtn.onclick = (e) => {
-                        e.stopPropagation();
-                        removeUser(user);
-                    };
-                    btn.appendChild(removeBtn);
-                }
+                // Add remove button
+                const removeBtn = document.createElement('span');
+                removeBtn.className = 'remove-btn';
+                removeBtn.textContent = '✕';
+                removeBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    removeUser(user);
+                };
+                btn.appendChild(removeBtn);
 
-                btn.onclick = () => selectUser(user);
+                // Click toggles user on/off
+                btn.onclick = () => toggleUser(user);
                 container.appendChild(btn);
             });
         }
 
-        function removeUser(username) {
-            hiddenUsers.add(username);
-            // Rebuild user list without hidden users
-            const visibleUsers = allData.users.filter(u => !hiddenUsers.has(u));
-
-            // Remove "All" if only one user left
-            if (visibleUsers.filter(u => u !== 'All').length <= 1) {
-                hiddenUsers.add('All');
+        function toggleUser(username) {
+            if (enabledUsers.has(username)) {
+                // Don't allow disabling if it's the only one enabled
+                if (enabledUsers.size <= 1) return;
+                enabledUsers.delete(username);
+            } else {
+                enabledUsers.add(username);
             }
-
-            setupUserButtons(allData.users, allData.data);
-
-            // Select first available user
-            const remaining = allData.users.filter(u => !hiddenUsers.has(u));
-            if (remaining.length > 0) {
-                selectUser(remaining[0]);
-            }
+            updateView();
         }
 
-        function selectUser(username) {
-            currentUser = username;
-            const isAll = username === 'All';
-            const includedUsers = isAll ? allData.users.filter(u => u !== 'All') : [];
+        function removeUser(username) {
+            enabledUsers.delete(username);
+            // Remove from allData.users list
+            allData.users = allData.users.filter(u => u !== username);
+            setupUserButtons(allData.users, allData.data);
+            updateView();
+        }
 
+        function updateView() {
+            // Update button states
             document.querySelectorAll('.user-btn').forEach(btn => {
                 const btnUser = btn.dataset.username;
-                btn.classList.toggle('active', btnUser === username);
-                btn.classList.toggle('included', isAll && includedUsers.includes(btnUser));
+                const isEnabled = enabledUsers.has(btnUser);
+                btn.classList.toggle('active', isEnabled);
+                btn.classList.toggle('disabled', !isEnabled);
             });
 
-            const userData = allData.data[username];
-            const userViz = allData.visualizations[username];
+            // Get combined data for enabled users or single user
+            const enabledList = Array.from(enabledUsers);
+            let userData, userViz;
+
+            if (enabledList.length === 1) {
+                currentUser = enabledList[0];
+                userData = allData.data[currentUser];
+                userViz = allData.visualizations[currentUser];
+            } else if (enabledList.length > 1 && allData.data['All']) {
+                currentUser = 'All';
+                userData = allData.data['All'];
+                userViz = allData.visualizations['All'];
+            } else {
+                currentUser = enabledList[0] || allData.users.find(u => u !== 'All');
+                userData = allData.data[currentUser];
+                userViz = allData.visualizations[currentUser];
+            }
 
             if (userData) {
                 displayUserProfile(userData);
                 displaySummary(userData);
                 displayStats(userData);
-                displayCharts(userData, userViz, username);
+                displayCharts(userData, userViz, currentUser);
                 document.getElementById('mainContent').style.display = 'block';
                 document.getElementById('loading').style.display = 'none';
-            } else {
-                showError('No data available for ' + username);
             }
+        }
+
+        function selectUser(username) {
+            // Enable only this user
+            enabledUsers.clear();
+            enabledUsers.add(username);
+            updateView();
         }
 
         function displayUserProfile(userData) {
