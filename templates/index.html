@@ -2044,7 +2044,7 @@ ORDER BY date DESC LIMIT 20;`
                     Plotly.newPlot('topReposLocChart', [
                         { x: added, y: repos, type: 'bar', orientation: 'h', name: 'Added', marker: { color: 'rgba(255,255,255,0.8)' } },
                         { x: deleted, y: repos, type: 'bar', orientation: 'h', name: 'Deleted', marker: { color: 'rgba(255,255,255,0.3)' } }
-                    ], { ...darkLayout, barmode: 'relative', yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
+                    ], { ...darkLayout, barmode: 'relative', xaxis: { type: 'linear' }, yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
                 }
             } catch (e) { console.error('Top repos LOC error:', e); }
 
