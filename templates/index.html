@@ -2085,7 +2085,8 @@ ORDER BY date DESC LIMIT 20;`
                 { id: 'heatmapChart', title: 'Monthly Activity Heatmap', key: 'heatmap' },
                 { id: 'yearlyCommitsChart', title: 'Yearly Commits', key: 'yearly_commits' },
                 { id: 'dayOfWeekChart', title: 'Activity by Day of Week', key: 'day_of_week' },
-                { id: 'peakMonthsChart', title: 'Most Productive Months', key: 'peak_months' }
+                { id: 'peakMonthsChart', title: 'Most Productive Months', key: 'peak_months' },
+                { id: 'activeReposChart', title: 'Active Projects per Month', key: 'active_repos' }
             ];
 
             // Create chart grid for some charts
@@ -2305,6 +2306,32 @@ ORDER BY date DESC LIMIT 20;`
                     }, plotConfig);
                 }
             } catch (e) { console.error('Peak months error:', e); }
+
+            // Active Projects per Month (unique repos with commits)
+            try {
+                const activeReposData = db.exec(`
+                    SELECT strftime('%Y-%m', date) as month, COUNT(DISTINCT repo) as repos
+                    FROM commits ${userFilter}
+                    GROUP BY month
+                    ORDER BY month
+                `);
+                if (activeReposData.length > 0) {
+                    const rows = activeReposData[0].values;
+                    const months = rows.map(r => r[0]);
+                    const repos = rows.map(r => r[1]);
+                    Plotly.newPlot('activeReposChart', [{
+                        x: months, y: repos, type: 'bar',
+                        marker: { color: 'rgba(255, 255, 255, 0.7)' },
+                        text: repos.map(r => r.toString()),
+                        textposition: 'auto'
+                    }], {
+                        ...darkLayout,
+                        xaxis: { ...darkLayout.xaxis, title: 'Month', tickangle: -45 },
+                        yaxis: { ...darkLayout.yaxis, title: 'Active Projects' },
+                        margin: { l: 50, r: 20, t: 20, b: 80 }
+                    }, plotConfig);
+                }
+            } catch (e) { console.error('Active repos error:', e); }
 
             // Monthly Heatmap
             try {
