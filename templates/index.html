@@ -1905,7 +1905,7 @@ ORDER BY date DESC LIMIT 20;`
 
             // Check if this is the combined "All" view
             if (user && user.username === 'All') {
-                const usernames = allData.users.filter(u => u !== 'All' && !hiddenUsers.has(u));
+                const usernames = allData.users.filter(u => u !== 'All' && enabledUsers.has(u));
                 let avatarsHtml = '<div class="multi-avatar">';
                 let totalFollowers = 0;
                 let totalRepos = 0;
