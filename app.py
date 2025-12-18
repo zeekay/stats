@@ -1351,10 +1351,10 @@ def export_static_site(output_dir: Path):
     injection = f'<script>window.STATIC_DATA = {data_json};</script>\n'
     html = html.replace('<script>', injection + '<script>', 1)
     
-    # Modify fetch to use static data
+    # Modify initApp fetch to use static data (be specific to avoid breaking initSqlDatabase)
     html = html.replace(
-        'const response = await fetch',
-        'if (window.STATIC_DATA) { allData = window.STATIC_DATA; setupUserButtons(allData.users); if (allData.users.length > 0) selectUser(allData.users[0]); return; }\n            const response = await fetch'
+        "const response = await fetch('/api/data');",
+        "if (window.STATIC_DATA) { allData = window.STATIC_DATA; setupUserButtons(allData.users); if (allData.users.length > 0) selectUser(allData.users[0]); return; }\n            const response = await fetch('/api/data');"
     )
     
     # Update title
