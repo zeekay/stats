@@ -1916,12 +1916,18 @@ ORDER BY date DESC LIMIT 20;`
             container.appendChild(gridContainer);
 
             // Render charts
+            const today = new Date().toISOString().split('T')[0];
             if (userViz) {
                 charts.forEach(chart => {
                     try {
                         if (userViz[chart.key]) {
                             const chartData = JSON.parse(userViz[chart.key]);
                             Object.assign(chartData.layout, darkLayout);
+                            // Cap timeline charts at today's date
+                            if (chart.key.includes('timeline')) {
+                                chartData.layout.xaxis = chartData.layout.xaxis || {};
+                                chartData.layout.xaxis.range = [null, today];
+                            }
                             Plotly.newPlot(chart.id, chartData.data, chartData.layout, plotConfig);
                         }
                     } catch (e) {
