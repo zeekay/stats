@@ -2011,6 +2011,38 @@ ORDER BY date DESC LIMIT 20;`
                     </tr>`;
                 });
                 html += '</table></div>';
+
+                // Period breakdown (7d, 30d, 90d, YTD, 1Y)
+                if (stats.periods) {
+                    const periodLabels = {
+                        '7d': 'Last 7 Days',
+                        '30d': 'Last 30 Days',
+                        '90d': 'Last 90 Days',
+                        'ytd': 'Year to Date',
+                        '1y': 'Last 12 Months'
+                    };
+                    html += '<h3 class="section-title" style="margin-top: 1.5rem;">Activity by Period</h3>';
+                    html += '<div class="table-wrapper"><table class="yearly-table">';
+                    html += '<tr><th>Period</th><th>Commits</th><th>Added</th><th>Deleted</th><th>Net</th><th>Active Days</th><th>Repos</th></tr>';
+
+                    ['7d', '30d', '90d', 'ytd', '1y'].forEach(period => {
+                        const p = stats.periods[period];
+                        if (p) {
+                            const net = p.additions - p.deletions;
+                            html += `<tr>
+                                <td>${periodLabels[period]}</td>
+                                <td>${formatNumber(p.commits)}</td>
+                                <td style="color:var(--foreground)">+${formatNumber(p.additions)}</td>
+                                <td style="color:var(--muted-foreground)">-${formatNumber(p.deletions)}</td>
+                                <td style="color:${net >= 0 ? 'var(--foreground)' : 'var(--muted-foreground)'}">${net >= 0 ? '+' : ''}${formatNumber(net)}</td>
+                                <td>${p.active_days || 0}</td>
+                                <td>${p.repos || 0}</td>
+                            </tr>`;
+                        }
+                    });
+                    html += '</table></div>';
+                }
+
                 yearlyContainer.innerHTML = html;
                 yearlyContainer.style.display = 'block';
             } else {
