@@ -1908,18 +1908,22 @@ ORDER BY date DESC LIMIT 20;`
                 { id: 'locTimelineChart', title: 'Lines of Code Over Time', key: 'loc_timeline' },
                 { id: 'cumulativeLocChart', title: 'Cumulative Lines of Code', key: 'cumulative_loc' },
                 { id: 'commitVelocityChart', title: 'Commit Velocity (Weekly)', key: 'commit_velocity' },
+                { id: 'langEvolutionChart', title: 'Language Evolution', key: 'lang_evolution' },
+                { id: 'focusChart', title: 'Projects Per Day (Focus Index)', key: 'focus' },
+                { id: 'commitSizeChart', title: 'Commit Size Distribution', key: 'commit_size' },
                 { id: 'languagesChart', title: 'Languages', key: 'languages' },
                 { id: 'topReposChart', title: 'Top Repositories (by Commits)', key: 'top_repos' },
                 { id: 'topReposLocChart', title: 'Top Repositories (by LOC)', key: 'top_repos_loc' },
                 { id: 'repoLifetimeChart', title: 'Repository Lifetime', key: 'repo_lifetime' },
                 { id: 'codeChurnChart', title: 'Code Churn (High Activity Repos)', key: 'code_churn' },
+                { id: 'stalenessChart', title: 'Repo Staleness (Days Since Last Commit)', key: 'staleness' },
                 { id: 'heatmapChart', title: 'Monthly Activity Heatmap', key: 'heatmap' },
                 { id: 'yearlyCommitsChart', title: 'Yearly Commits', key: 'yearly_commits' },
                 { id: 'dayOfWeekChart', title: 'Activity by Day of Week', key: 'day_of_week' }
             ];
 
             // Create chart grid for some charts
-            const fullWidthCharts = ['commits_timeline', 'loc_timeline', 'cumulative_loc', 'commit_velocity', 'heatmap'];
+            const fullWidthCharts = ['commits_timeline', 'loc_timeline', 'cumulative_loc', 'commit_velocity', 'lang_evolution', 'focus', 'heatmap'];
             const gridCharts = charts.filter(c => !fullWidthCharts.includes(c.key));
             const wideCharts = charts.filter(c => fullWidthCharts.includes(c.key));
 
@@ -2173,6 +2177,127 @@ ORDER BY date DESC LIMIT 20;`
                     ], { ...darkLayout, legend: { orientation: 'h', y: 1.1 } }, plotConfig);
                 }
             } catch (e) { console.error('Commit velocity error:', e); }
+
+            // Language Evolution Over Time (stacked area)
+            try {
+                const langEvoData = db.exec(`
+                    SELECT strftime('%Y', c.date) as year, l.language, SUM(l.bytes) as bytes
+                    FROM commits c
+                    JOIN languages l ON c.repo = l.repo
+                    WHERE l.language IS NOT NULL ${userFilterAnd.replace('AND', 'AND c.')}
+                    GROUP BY year, l.language
+                    ORDER BY year, bytes DESC
+                `);
+                if (langEvoData.length > 0) {
+                    const rows = langEvoData[0].values;
+                    const years = [...new Set(rows.map(r => r[0]))].sort();
+                    const allLangs = [...new Set(rows.map(r => r[1]))];
+                    // Get top 10 languages by total bytes
+                    const langTotals = {};
+                    rows.forEach(r => { langTotals[r[1]] = (langTotals[r[1]] || 0) + r[2]; });
+                    const topLangs = Object.entries(langTotals).sort((a, b) => b[1] - a[1]).slice(0, 10).map(e => e[0]);
+                    // Build traces for each language
+                    const traces = topLangs.map((lang, i) => ({
+                        x: years,
+                        y: years.map(y => {
+                            const row = rows.find(r => r[0] === y && r[1] === lang);
+                            return row ? row[2] : 0;
+                        }),
+                        name: lang,
+                        stackgroup: 'one',
+                        fillcolor: `hsla(${i * 36}, 70%, 50%, 0.7)`,
+                        line: { width: 0 }
+                    }));
+                    Plotly.newPlot('langEvolutionChart', traces, {
+                        ...darkLayout,
+                        legend: { orientation: 'h', y: 1.15 },
+                        yaxis: { ...darkLayout.yaxis, title: 'Bytes' }
+                    }, plotConfig);
+                }
+            } catch (e) { console.error('Language evolution error:', e); }
+
+            // Projects Per Day (Focus Index)
+            try {
+                const focusData = db.exec(`
+                    SELECT date, COUNT(DISTINCT repo) as repos
+                    FROM commits
+                    WHERE repo IS NOT NULL ${userFilterAnd}
+                    GROUP BY date
+                    HAVING date <= '${today}'
+                    ORDER BY date
+                `);
+                if (focusData.length > 0) {
+                    const rows = focusData[0].values;
+                    const dates = rows.map(r => r[0]);
+                    const repos = rows.map(r => r[1]);
+                    // Calculate 30-day rolling average
+                    const rolling30d = repos.map((_, i) => {
+                        const start = Math.max(0, i - 29);
+                        const slice = repos.slice(start, i + 1);
+                        return slice.reduce((a, b) => a + b, 0) / slice.length;
+                    });
+                    Plotly.newPlot('focusChart', [
+                        { x: dates, y: repos, type: 'bar', name: 'Daily', marker: { color: 'rgba(255,255,255,0.2)' } },
+                        { x: dates, y: rolling30d, mode: 'lines', name: '30-day avg', line: { color: '#fff', width: 2 } }
+                    ], {
+                        ...darkLayout,
+                        legend: { orientation: 'h', y: 1.1 },
+                        yaxis: { ...darkLayout.yaxis, title: 'Distinct Repos' }
+                    }, plotConfig);
+                }
+            } catch (e) { console.error('Focus index error:', e); }
+
+            // Commit Size Distribution (histogram)
+            try {
+                const sizeData = db.exec(`
+                    SELECT additions + deletions as size
+                    FROM commits ${userFilter}
+                    WHERE additions IS NOT NULL AND deletions IS NOT NULL
+                `);
+                if (sizeData.length > 0) {
+                    const sizes = sizeData[0].values.map(r => r[0]).filter(s => s > 0 && s < 10000);
+                    Plotly.newPlot('commitSizeChart', [{
+                        x: sizes, type: 'histogram',
+                        marker: { color: 'rgba(255,255,255,0.7)' },
+                        nbinsx: 50
+                    }], {
+                        ...darkLayout,
+                        xaxis: { ...darkLayout.xaxis, title: 'Lines Changed', type: 'linear' },
+                        yaxis: { ...darkLayout.yaxis, title: 'Commit Count' }
+                    }, plotConfig);
+                }
+            } catch (e) { console.error('Commit size error:', e); }
+
+            // Repo Staleness (days since last commit)
+            try {
+                const stalenessData = db.exec(`
+                    SELECT repo, MAX(date) as last_commit,
+                           CAST(julianday('${today}') - julianday(MAX(date)) AS INTEGER) as days_stale
+                    FROM commits
+                    WHERE repo IS NOT NULL AND repo != '' ${userFilterAnd}
+                    GROUP BY repo
+                    ORDER BY days_stale DESC
+                    LIMIT 20
+                `);
+                if (stalenessData.length > 0) {
+                    const rows = stalenessData[0].values;
+                    const repos = rows.map(r => (r[0] || '').split('/').pop().slice(0, 20));
+                    const days = rows.map(r => r[2]);
+                    Plotly.newPlot('stalenessChart', [{
+                        x: days, y: repos, type: 'bar', orientation: 'h',
+                        marker: {
+                            color: days.map(d => d > 365 ? '#ff4444' : d > 180 ? '#ffaa00' : d > 30 ? '#aaaaaa' : '#44ff44')
+                        },
+                        text: days.map(d => d > 365 ? `${Math.floor(d/365)}y` : d > 30 ? `${Math.floor(d/30)}mo` : `${d}d`),
+                        textposition: 'auto'
+                    }], {
+                        ...darkLayout,
+                        xaxis: { ...darkLayout.xaxis, title: 'Days Since Last Commit', type: 'linear' },
+                        yaxis: { type: 'category', autorange: 'reversed' },
+                        margin: { l: 120, r: 20, t: 20, b: 40 }
+                    }, plotConfig);
+                }
+            } catch (e) { console.error('Staleness error:', e); }
 
             // Repository Lifetime
             try {
