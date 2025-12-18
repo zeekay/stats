@@ -2034,7 +2034,7 @@ ORDER BY date DESC LIMIT 20;`
                     Plotly.newPlot('topReposChart', [{
                         x: commits, y: repos, type: 'bar', orientation: 'h',
                         marker: { color: '#fff' }, text: commits, textposition: 'auto'
-                    }], { ...darkLayout, yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
+                    }], { ...darkLayout, xaxis: { ...darkLayout.xaxis, type: 'linear' }, yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
                 }
             } catch (e) { console.error('Top repos error:', e); }
 
@@ -2196,7 +2196,7 @@ ORDER BY date DESC LIMIT 20;`
                         name: repos[i], showlegend: false, hoverinfo: 'x+name'
                     }));
                     Plotly.newPlot('repoLifetimeChart', traces, {
-                        ...darkLayout, yaxis: { type: 'category' }, margin: { l: 100, r: 20, t: 20, b: 40 },
+                        ...darkLayout, xaxis: { ...darkLayout.xaxis, type: 'date', tickformat: '%b %d, %Y' }, yaxis: { type: 'category' }, margin: { l: 100, r: 20, t: 20, b: 40 },
                         hovermode: 'closest'
                     }, plotConfig);
                 }

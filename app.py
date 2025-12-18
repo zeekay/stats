@@ -1148,6 +1148,16 @@ def get_stats():
     return jsonify({'success': True, 'stats': stats})
 
 
+@app.route('/stats.db')
+def serve_stats_db():
+    """Serve the SQLite database file for client-side SQL queries."""
+    from flask import send_file
+    db_path = DB_PATH
+    if db_path.exists():
+        return send_file(db_path, mimetype='application/octet-stream')
+    return jsonify({'error': 'Database not found'}), 404
+
+
 @app.route('/api/top-repos/<username>')
 def get_top_repos(username):
     order = request.args.get('order', 'commits')
