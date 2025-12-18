@@ -1177,6 +1177,21 @@ LIMIT 20;</textarea>
                     locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
                 });
 
+                // Try to load pre-built stats.db file first
+                try {
+                    const dbUrl = window.location.pathname.replace(/\/$/, '') + '/stats.db';
+                    const response = await fetch(dbUrl);
+                    if (response.ok) {
+                        const buffer = await response.arrayBuffer();
+                        db = new SQL.Database(new Uint8Array(buffer));
+                        console.log('Loaded stats.db from server');
+                        return db;
+                    }
+                } catch (e) {
+                    console.log('Could not load stats.db, creating from JSON data');
+                }
+
+                // Fallback: create from JSON data
                 db = new SQL.Database();
 
                 // Create schema
@@ -1915,26 +1930,188 @@ ORDER BY date DESC LIMIT 20;`
             });
             container.appendChild(gridContainer);
 
-            // Render charts
+            // Render charts from SQL data
+            await renderChartsFromSQL(username, darkLayout, plotConfig);
+        }
+
+        async function renderChartsFromSQL(username, darkLayout, plotConfig) {
+            if (!db) await initSqlDatabase();
+            if (!db) return;
+
             const today = new Date().toISOString().split('T')[0];
-            if (userViz) {
-                charts.forEach(chart => {
-                    try {
-                        if (userViz[chart.key]) {
-                            const chartData = JSON.parse(userViz[chart.key]);
-                            Object.assign(chartData.layout, darkLayout);
-                            // Cap timeline charts at today's date
-                            if (chart.key.includes('timeline')) {
-                                chartData.layout.xaxis = chartData.layout.xaxis || {};
-                                chartData.layout.xaxis.range = [null, today];
-                            }
-                            Plotly.newPlot(chart.id, chartData.data, chartData.layout, plotConfig);
-                        }
-                    } catch (e) {
-                        console.error(`Error rendering ${chart.key}:`, e);
-                    }
-                });
-            }
+            const isAll = username === 'All';
+            const userFilter = isAll ? '' : `WHERE username = '${username}'`;
+            const userFilterAnd = isAll ? '' : `AND username = '${username}'`;
+
+            // Commits Over Time
+            try {
+                const dailyData = db.exec(`
+                    SELECT date, COUNT(*) as commits
+                    FROM commits ${userFilter}
+                    GROUP BY date
+                    HAVING date <= '${today}'
+                    ORDER BY date
+                `);
+                if (dailyData.length > 0) {
+                    const rows = dailyData[0].values;
+                    const dates = rows.map(r => r[0]);
+                    const commits = rows.map(r => r[1]);
+                    // Calculate rolling averages
+                    const commits7d = commits.map((_, i) => {
+                        const start = Math.max(0, i - 6);
+                        const slice = commits.slice(start, i + 1);
+                        return slice.reduce((a, b) => a + b, 0) / slice.length;
+                    });
+                    const commits30d = commits.map((_, i) => {
+                        const start = Math.max(0, i - 29);
+                        const slice = commits.slice(start, i + 1);
+                        return slice.reduce((a, b) => a + b, 0) / slice.length;
+                    });
+
+                    Plotly.newPlot('commitsTimelineChart', [
+                        { x: dates, y: commits, mode: 'lines', name: 'Daily', line: { color: 'rgba(255,255,255,0.2)', width: 1 } },
+                        { x: dates, y: commits7d, mode: 'lines', name: '7-day avg', line: { color: '#fff', width: 2 } },
+                        { x: dates, y: commits30d, mode: 'lines', name: '30-day avg', line: { color: 'rgba(255,255,255,0.5)', width: 2, dash: 'dash' } }
+                    ], { ...darkLayout, legend: { orientation: 'h', y: 1.1 } }, plotConfig);
+                }
+            } catch (e) { console.error('Commits timeline error:', e); }
+
+            // LOC Over Time
+            try {
+                const locData = db.exec(`
+                    SELECT date, SUM(additions) as added, SUM(deletions) as deleted
+                    FROM commits ${userFilter}
+                    GROUP BY date
+                    HAVING date <= '${today}'
+                    ORDER BY date
+                `);
+                if (locData.length > 0) {
+                    const rows = locData[0].values;
+                    const dates = rows.map(r => r[0]);
+                    const added = rows.map(r => r[1] || 0);
+                    const deleted = rows.map(r => -(r[2] || 0));
+                    const net = rows.map((r, i) => (r[1] || 0) - (r[2] || 0));
+                    const net30d = net.map((_, i) => {
+                        const start = Math.max(0, i - 29);
+                        const slice = net.slice(start, i + 1);
+                        return slice.reduce((a, b) => a + b, 0) / slice.length;
+                    });
+
+                    Plotly.newPlot('locTimelineChart', [
+                        { x: dates, y: added, type: 'bar', name: 'Added', marker: { color: 'rgba(255,255,255,0.7)' } },
+                        { x: dates, y: deleted, type: 'bar', name: 'Deleted', marker: { color: 'rgba(255,255,255,0.3)' } },
+                        { x: dates, y: net30d, mode: 'lines', name: 'Net (30d)', line: { color: '#fff', width: 3 } }
+                    ], { ...darkLayout, barmode: 'relative', legend: { orientation: 'h', y: 1.1 } }, plotConfig);
+                }
+            } catch (e) { console.error('LOC timeline error:', e); }
+
+            // Top Repos by Commits
+            try {
+                const repoData = db.exec(`
+                    SELECT repo, COUNT(*) as commits
+                    FROM commits
+                    WHERE repo IS NOT NULL AND repo != '' ${userFilterAnd}
+                    GROUP BY repo
+                    ORDER BY commits DESC
+                    LIMIT 10
+                `);
+                if (repoData.length > 0) {
+                    const rows = repoData[0].values;
+                    const repos = rows.map(r => (r[0] || '').split('/').pop().slice(0, 20));
+                    const commits = rows.map(r => r[1]);
+                    Plotly.newPlot('topReposChart', [{
+                        x: commits, y: repos, type: 'bar', orientation: 'h',
+                        marker: { color: '#fff' }, text: commits, textposition: 'auto'
+                    }], { ...darkLayout, yaxis: { autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
+                }
+            } catch (e) { console.error('Top repos error:', e); }
+
+            // Top Repos by LOC
+            try {
+                const locRepoData = db.exec(`
+                    SELECT repo, SUM(additions) as added, SUM(deletions) as deleted
+                    FROM commits
+                    WHERE repo IS NOT NULL AND repo != '' ${userFilterAnd}
+                    GROUP BY repo
+                    ORDER BY added DESC
+                    LIMIT 10
+                `);
+                if (locRepoData.length > 0) {
+                    const rows = locRepoData[0].values;
+                    const repos = rows.map(r => (r[0] || '').split('/').pop().slice(0, 20));
+                    const added = rows.map(r => r[1] || 0);
+                    const deleted = rows.map(r => -(r[2] || 0));
+                    Plotly.newPlot('topReposLocChart', [
+                        { x: added, y: repos, type: 'bar', orientation: 'h', name: 'Added', marker: { color: 'rgba(255,255,255,0.8)' } },
+                        { x: deleted, y: repos, type: 'bar', orientation: 'h', name: 'Deleted', marker: { color: 'rgba(255,255,255,0.3)' } }
+                    ], { ...darkLayout, barmode: 'relative', yaxis: { autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
+                }
+            } catch (e) { console.error('Top repos LOC error:', e); }
+
+            // Yearly Commits
+            try {
+                const yearlyData = db.exec(`
+                    SELECT strftime('%Y', date) as year, COUNT(*) as commits
+                    FROM commits ${userFilter}
+                    GROUP BY year
+                    ORDER BY year
+                `);
+                if (yearlyData.length > 0) {
+                    const rows = yearlyData[0].values;
+                    const years = rows.map(r => r[0]);
+                    const commits = rows.map(r => r[1]);
+                    Plotly.newPlot('yearlyCommitsChart', [{
+                        x: years, y: commits, type: 'bar',
+                        marker: { color: '#fff' }, text: commits, textposition: 'auto'
+                    }], darkLayout, plotConfig);
+                }
+            } catch (e) { console.error('Yearly commits error:', e); }
+
+            // Day of Week
+            try {
+                const dowData = db.exec(`
+                    SELECT CASE CAST(strftime('%w', date) AS INTEGER)
+                        WHEN 0 THEN 'Sunday' WHEN 1 THEN 'Monday' WHEN 2 THEN 'Tuesday'
+                        WHEN 3 THEN 'Wednesday' WHEN 4 THEN 'Thursday' WHEN 5 THEN 'Friday'
+                        WHEN 6 THEN 'Saturday' END as day,
+                        COUNT(*) as commits
+                    FROM commits ${userFilter}
+                    GROUP BY strftime('%w', date)
+                    ORDER BY CAST(strftime('%w', date) AS INTEGER)
+                `);
+                if (dowData.length > 0) {
+                    const rows = dowData[0].values;
+                    const days = rows.map(r => r[0]);
+                    const commits = rows.map(r => r[1]);
+                    Plotly.newPlot('dayOfWeekChart', [{
+                        x: days, y: commits, type: 'bar',
+                        marker: { color: '#fff' }, text: commits, textposition: 'auto'
+                    }], darkLayout, plotConfig);
+                }
+            } catch (e) { console.error('Day of week error:', e); }
+
+            // Monthly Heatmap
+            try {
+                const monthlyData = db.exec(`
+                    SELECT strftime('%Y', date) as year, CAST(strftime('%m', date) AS INTEGER) as month, COUNT(*) as commits
+                    FROM commits ${userFilter}
+                    GROUP BY year, month
+                    ORDER BY year, month
+                `);
+                if (monthlyData.length > 0) {
+                    const rows = monthlyData[0].values;
+                    const years = [...new Set(rows.map(r => r[0]))];
+                    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                    const z = years.map(y => months.map((_, m) => {
+                        const row = rows.find(r => r[0] === y && r[1] === m + 1);
+                        return row ? row[2] : 0;
+                    }));
+                    Plotly.newPlot('heatmapChart', [{
+                        z: z, y: years, x: months, type: 'heatmap',
+                        colorscale: [[0, '#0a0a0a'], [0.5, '#404040'], [1, '#ffffff']]
+                    }], darkLayout, plotConfig);
+                }
+            } catch (e) { console.error('Heatmap error:', e); }
         }
 
         async function fetchNewUser() {
