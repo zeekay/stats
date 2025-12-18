@@ -2118,11 +2118,12 @@ ORDER BY date DESC LIMIT 20;`
                 { id: 'yearlyCommitsChart', title: 'Yearly Commits', key: 'yearly_commits' },
                 { id: 'dayOfWeekChart', title: 'Activity by Day of Week', key: 'day_of_week' },
                 { id: 'peakMonthsChart', title: 'Most Productive Months', key: 'peak_months' },
-                { id: 'activeReposChart', title: 'Active Projects per Month', key: 'active_repos' }
+                { id: 'activeReposChart', title: 'Active Projects per Month', key: 'active_repos' },
+                { id: 'last30dChart', title: 'Last 30 Days Activity', key: 'last_30d' }
             ];
 
             // Create chart grid for some charts
-            const fullWidthCharts = ['commits_timeline', 'loc_timeline', 'cumulative_loc', 'commit_velocity', 'org_timeline', 'lang_evolution', 'focus', 'heatmap'];
+            const fullWidthCharts = ['commits_timeline', 'loc_timeline', 'cumulative_loc', 'commit_velocity', 'org_timeline', 'lang_evolution', 'focus', 'heatmap', 'last_30d'];
             const gridCharts = charts.filter(c => !fullWidthCharts.includes(c.key));
             const wideCharts = charts.filter(c => fullWidthCharts.includes(c.key));
 
@@ -2364,6 +2365,37 @@ ORDER BY date DESC LIMIT 20;`
                     }, plotConfig);
                 }
             } catch (e) { console.error('Active repos error:', e); }
+
+            // Last 30 Days Activity (daily breakdown)
+            try {
+                const last30dData = db.exec(`
+                    SELECT date, COUNT(*) as commits,
+                           COALESCE(SUM(additions), 0) as additions,
+                           COALESCE(SUM(deletions), 0) as deletions,
+                           COUNT(DISTINCT repo) as repos
+                    FROM commits ${userFilter}
+                    WHERE date >= date('now', '-30 days')
+                    GROUP BY date
+                    ORDER BY date
+                `);
+                if (last30dData.length > 0) {
+                    const rows = last30dData[0].values;
+                    const dates = rows.map(r => r[0]);
+                    const commits = rows.map(r => r[1]);
+                    const net = rows.map(r => r[2] - r[3]);
+                    Plotly.newPlot('last30dChart', [
+                        { x: dates, y: commits, type: 'bar', name: 'Commits', marker: { color: 'rgba(255,255,255,0.6)' } },
+                        { x: dates, y: net, type: 'scatter', mode: 'lines', name: 'Net LOC', yaxis: 'y2', line: { color: '#888', width: 2 } }
+                    ], {
+                        ...darkLayout,
+                        xaxis: { ...darkLayout.xaxis, title: 'Date', tickangle: -45 },
+                        yaxis: { ...darkLayout.yaxis, title: 'Commits', side: 'left' },
+                        yaxis2: { title: 'Net LOC', overlaying: 'y', side: 'right', gridcolor: 'transparent', color: '#888' },
+                        legend: { orientation: 'h', y: 1.1 },
+                        margin: { l: 50, r: 50, t: 30, b: 80 }
+                    }, plotConfig);
+                }
+            } catch (e) { console.error('Last 30d error:', e); }
 
             // Monthly Heatmap
             try {
