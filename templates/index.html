@@ -2022,7 +2022,7 @@ ORDER BY date DESC LIMIT 20;`
                     Plotly.newPlot('topReposChart', [{
                         x: commits, y: repos, type: 'bar', orientation: 'h',
                         marker: { color: '#fff' }, text: commits, textposition: 'auto'
-                    }], { ...darkLayout, yaxis: { autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
+                    }], { ...darkLayout, yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
                 }
             } catch (e) { console.error('Top repos error:', e); }
 
@@ -2044,7 +2044,7 @@ ORDER BY date DESC LIMIT 20;`
                     Plotly.newPlot('topReposLocChart', [
                         { x: added, y: repos, type: 'bar', orientation: 'h', name: 'Added', marker: { color: 'rgba(255,255,255,0.8)' } },
                         { x: deleted, y: repos, type: 'bar', orientation: 'h', name: 'Deleted', marker: { color: 'rgba(255,255,255,0.3)' } }
-                    ], { ...darkLayout, barmode: 'relative', yaxis: { autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
+                    ], { ...darkLayout, barmode: 'relative', yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
                 }
             } catch (e) { console.error('Top repos LOC error:', e); }
 
@@ -2086,7 +2086,7 @@ ORDER BY date DESC LIMIT 20;`
                     Plotly.newPlot('dayOfWeekChart', [{
                         x: days, y: commits, type: 'bar',
                         marker: { color: '#fff' }, text: commits, textposition: 'auto'
-                    }], darkLayout, plotConfig);
+                    }], { ...darkLayout, xaxis: { ...darkLayout.xaxis, type: 'category' } }, plotConfig);
                 }
             } catch (e) { console.error('Day of week error:', e); }
 
@@ -2109,7 +2109,7 @@ ORDER BY date DESC LIMIT 20;`
                     Plotly.newPlot('heatmapChart', [{
                         z: z, y: years, x: months, type: 'heatmap',
                         colorscale: [[0, '#0a0a0a'], [0.5, '#404040'], [1, '#ffffff']]
-                    }], darkLayout, plotConfig);
+                    }], { ...darkLayout, xaxis: { ...darkLayout.xaxis, type: 'category' }, yaxis: { ...darkLayout.yaxis, type: 'category', autorange: 'reversed' } }, plotConfig);
                 }
             } catch (e) { console.error('Heatmap error:', e); }
         }
