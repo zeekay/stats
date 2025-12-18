@@ -114,7 +114,17 @@ class StatsDB:
                 fetched_at TEXT,
                 PRIMARY KEY (username, year_month)
             );
-            
+
+            -- Languages per repo
+            CREATE TABLE IF NOT EXISTS languages (
+                repo TEXT NOT NULL,
+                username TEXT NOT NULL,
+                language TEXT NOT NULL,
+                bytes INTEGER DEFAULT 0,
+                fetched_at TEXT,
+                PRIMARY KEY (repo, language)
+            );
+
             -- Indexes for fast queries
             CREATE INDEX IF NOT EXISTS idx_commits_user_date ON commits(username, date);
             CREATE INDEX IF NOT EXISTS idx_commits_repo ON commits(repo);
@@ -679,7 +689,53 @@ class GitHubStatsAnalyzer:
             time.sleep(REQUEST_DELAY)
         
         return fetched
-    
+
+    def fetch_languages(self, username: str) -> int:
+        """Fetch language stats for all repos of a user."""
+        # Get all unique repos for this user
+        conn = self.db._get_conn()
+        repos = conn.execute('''
+            SELECT DISTINCT repo FROM commits
+            WHERE username = ? AND repo IS NOT NULL AND repo != ''
+        ''', (username,)).fetchall()
+        conn.close()
+
+        fetched = 0
+        for (repo,) in repos:
+            # Check if already fetched
+            conn = self.db._get_conn()
+            existing = conn.execute('SELECT 1 FROM languages WHERE repo = ?', (repo,)).fetchone()
+            conn.close()
+            if existing:
+                continue
+
+            # Fetch from GitHub
+            try:
+                resp = requests.get(
+                    f'https://api.github.com/repos/{repo}/languages',
+                    headers=GitHubAPI.get_headers()
+                )
+                if resp.status_code == 200:
+                    languages = resp.json()
+                    conn = self.db._get_conn()
+                    for lang, bytes_count in languages.items():
+                        conn.execute('''
+                            INSERT OR REPLACE INTO languages (repo, username, language, bytes, fetched_at)
+                            VALUES (?, ?, ?, ?, ?)
+                        ''', (repo, username, lang, bytes_count, datetime.now().isoformat()))
+                    conn.commit()
+                    conn.close()
+                    fetched += 1
+
+                    if fetched % 20 == 0:
+                        print(f'    Fetched languages for {fetched} repos')
+
+                time.sleep(REQUEST_DELAY)
+            except Exception as e:
+                print(f'    Error fetching languages for {repo}: {e}')
+
+        return fetched
+
     def get_user_data(self, username: str, fetch: bool = False) -> dict:
         """Get all data for a user. If fetch=True, fetches new data from GitHub first."""
         if fetch:
@@ -1287,6 +1343,69 @@ def fetch_loc_stream():
                 errors += 1
 
             if (i + 1) % 20 == 0:
+                yield f'data: {{"status": "progress", "processed": {i+1}, "total": {total}, "success": {success}, "errors": {errors}}}\n\n'
+
+            time.sleep(0.1)  # Rate limit
+
+        yield f'data: {{"status": "complete", "success": {success}, "errors": {errors}}}\n\n'
+
+    return Response(generate(), mimetype='text/event-stream',
+                   headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
+@app.route('/api/fetch-languages')
+def fetch_languages_api():
+    """Fetch language stats for all repos."""
+    from flask import Response
+
+    def generate():
+        # Get all unique repos
+        conn = analyzer.db._get_conn()
+        repos = conn.execute('''
+            SELECT DISTINCT repo, username FROM commits
+            WHERE repo IS NOT NULL AND repo != ''
+        ''').fetchall()
+        conn.close()
+
+        # Check which ones need fetching
+        need_fetch = []
+        for row in repos:
+            repo, username = row['repo'], row['username']
+            conn = analyzer.db._get_conn()
+            existing = conn.execute('SELECT 1 FROM languages WHERE repo = ?', (repo,)).fetchone()
+            conn.close()
+            if not existing:
+                need_fetch.append((repo, username))
+
+        total = len(need_fetch)
+        yield f'data: {{"status": "starting", "total": {total}}}\n\n'
+
+        success = 0
+        errors = 0
+
+        for i, (repo, username) in enumerate(need_fetch):
+            try:
+                resp = requests.get(
+                    f'https://api.github.com/repos/{repo}/languages',
+                    headers=REST_HEADERS, timeout=10
+                )
+                if resp.status_code == 200:
+                    languages = resp.json()
+                    conn = analyzer.db._get_conn()
+                    for lang, bytes_count in languages.items():
+                        conn.execute('''
+                            INSERT OR REPLACE INTO languages (repo, username, language, bytes, fetched_at)
+                            VALUES (?, ?, ?, ?, ?)
+                        ''', (repo, username, lang, bytes_count, datetime.now().isoformat()))
+                    conn.commit()
+                    conn.close()
+                    success += 1
+                else:
+                    errors += 1
+            except:
+                errors += 1
+
+            if (i + 1) % 10 == 0:
                 yield f'data: {{"status": "progress", "processed": {i+1}, "total": {total}, "success": {success}, "errors": {errors}}}\n\n'
 
             time.sleep(0.1)  # Rate limit

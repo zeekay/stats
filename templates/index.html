@@ -1209,6 +1209,13 @@ LIMIT 20;</textarea>
                         message TEXT, url TEXT,
                         additions INTEGER, deletions INTEGER
                     );
+                    CREATE TABLE IF NOT EXISTS languages (
+                        repo TEXT NOT NULL,
+                        username TEXT NOT NULL,
+                        language TEXT NOT NULL,
+                        bytes INTEGER DEFAULT 0,
+                        PRIMARY KEY (repo, language)
+                    );
                     CREATE INDEX IF NOT EXISTS idx_commits_user ON commits(username);
                     CREATE INDEX IF NOT EXISTS idx_commits_date ON commits(date);
                     CREATE INDEX IF NOT EXISTS idx_commits_repo ON commits(repo);
@@ -1899,15 +1906,20 @@ ORDER BY date DESC LIMIT 20;`
             const charts = [
                 { id: 'commitsTimelineChart', title: 'Commits Over Time', key: 'commits_timeline' },
                 { id: 'locTimelineChart', title: 'Lines of Code Over Time', key: 'loc_timeline' },
+                { id: 'cumulativeLocChart', title: 'Cumulative Lines of Code', key: 'cumulative_loc' },
+                { id: 'commitVelocityChart', title: 'Commit Velocity (Weekly)', key: 'commit_velocity' },
+                { id: 'languagesChart', title: 'Languages', key: 'languages' },
                 { id: 'topReposChart', title: 'Top Repositories (by Commits)', key: 'top_repos' },
                 { id: 'topReposLocChart', title: 'Top Repositories (by LOC)', key: 'top_repos_loc' },
+                { id: 'repoLifetimeChart', title: 'Repository Lifetime', key: 'repo_lifetime' },
+                { id: 'codeChurnChart', title: 'Code Churn (High Activity Repos)', key: 'code_churn' },
                 { id: 'heatmapChart', title: 'Monthly Activity Heatmap', key: 'heatmap' },
                 { id: 'yearlyCommitsChart', title: 'Yearly Commits', key: 'yearly_commits' },
                 { id: 'dayOfWeekChart', title: 'Activity by Day of Week', key: 'day_of_week' }
             ];
 
             // Create chart grid for some charts
-            const fullWidthCharts = ['commits_timeline', 'loc_timeline', 'heatmap'];
+            const fullWidthCharts = ['commits_timeline', 'loc_timeline', 'cumulative_loc', 'commit_velocity', 'heatmap'];
             const gridCharts = charts.filter(c => !fullWidthCharts.includes(c.key));
             const wideCharts = charts.filter(c => fullWidthCharts.includes(c.key));
 
@@ -2112,6 +2124,128 @@ ORDER BY date DESC LIMIT 20;`
                     }], { ...darkLayout, xaxis: { ...darkLayout.xaxis, type: 'category' }, yaxis: { ...darkLayout.yaxis, type: 'category', autorange: 'reversed' } }, plotConfig);
                 }
             } catch (e) { console.error('Heatmap error:', e); }
+
+            // Cumulative LOC
+            try {
+                const cumLocData = db.exec(`
+                    SELECT date, SUM(additions) - SUM(deletions) as net_loc
+                    FROM commits ${userFilter}
+                    GROUP BY date
+                    HAVING date <= '${today}'
+                    ORDER BY date
+                `);
+                if (cumLocData.length > 0) {
+                    const rows = cumLocData[0].values;
+                    const dates = rows.map(r => r[0]);
+                    const netLoc = rows.map(r => r[1] || 0);
+                    // Calculate cumulative sum
+                    let cumulative = 0;
+                    const cumulativeLoc = netLoc.map(n => { cumulative += n; return cumulative; });
+                    Plotly.newPlot('cumulativeLocChart', [{
+                        x: dates, y: cumulativeLoc, mode: 'lines', fill: 'tozeroy',
+                        line: { color: '#fff', width: 2 }, fillcolor: 'rgba(255,255,255,0.1)'
+                    }], { ...darkLayout, yaxis: { ...darkLayout.yaxis, title: 'Total LOC' } }, plotConfig);
+                }
+            } catch (e) { console.error('Cumulative LOC error:', e); }
+
+            // Commit Velocity (Weekly)
+            try {
+                const velocityData = db.exec(`
+                    SELECT strftime('%Y-%W', date) as week, COUNT(*) as commits
+                    FROM commits ${userFilter}
+                    GROUP BY week
+                    HAVING week <= strftime('%Y-%W', '${today}')
+                    ORDER BY week
+                `);
+                if (velocityData.length > 0) {
+                    const rows = velocityData[0].values;
+                    const weeks = rows.map(r => r[0]);
+                    const commits = rows.map(r => r[1]);
+                    // Calculate rolling 4-week average
+                    const rolling4w = commits.map((_, i) => {
+                        const start = Math.max(0, i - 3);
+                        const slice = commits.slice(start, i + 1);
+                        return slice.reduce((a, b) => a + b, 0) / slice.length;
+                    });
+                    Plotly.newPlot('commitVelocityChart', [
+                        { x: weeks, y: commits, type: 'bar', name: 'Weekly', marker: { color: 'rgba(255,255,255,0.3)' } },
+                        { x: weeks, y: rolling4w, mode: 'lines', name: '4-week avg', line: { color: '#fff', width: 2 } }
+                    ], { ...darkLayout, legend: { orientation: 'h', y: 1.1 } }, plotConfig);
+                }
+            } catch (e) { console.error('Commit velocity error:', e); }
+
+            // Repository Lifetime
+            try {
+                const lifetimeData = db.exec(`
+                    SELECT repo, MIN(date) as first_commit, MAX(date) as last_commit, COUNT(*) as commits
+                    FROM commits
+                    WHERE repo IS NOT NULL AND repo != '' ${userFilterAnd}
+                    GROUP BY repo
+                    ORDER BY first_commit
+                    LIMIT 20
+                `);
+                if (lifetimeData.length > 0) {
+                    const rows = lifetimeData[0].values;
+                    const repos = rows.map(r => (r[0] || '').split('/').pop().slice(0, 15));
+                    const firstDates = rows.map(r => r[1]);
+                    const lastDates = rows.map(r => r[2]);
+                    // Create timeline bars
+                    const traces = rows.map((r, i) => ({
+                        x: [r[1], r[2]], y: [repos[i], repos[i]], mode: 'lines+markers',
+                        line: { color: '#fff', width: 8 }, marker: { size: 8, color: '#fff' },
+                        name: repos[i], showlegend: false, hoverinfo: 'x+name'
+                    }));
+                    Plotly.newPlot('repoLifetimeChart', traces, {
+                        ...darkLayout, yaxis: { type: 'category' }, margin: { l: 100, r: 20, t: 20, b: 40 },
+                        hovermode: 'closest'
+                    }, plotConfig);
+                }
+            } catch (e) { console.error('Repo lifetime error:', e); }
+
+            // Code Churn (repos with high additions + deletions)
+            try {
+                const churnData = db.exec(`
+                    SELECT repo, SUM(additions) as added, SUM(deletions) as deleted,
+                           SUM(additions) + SUM(deletions) as churn
+                    FROM commits
+                    WHERE repo IS NOT NULL AND repo != '' ${userFilterAnd}
+                    GROUP BY repo
+                    ORDER BY churn DESC
+                    LIMIT 10
+                `);
+                if (churnData.length > 0) {
+                    const rows = churnData[0].values;
+                    const repos = rows.map(r => (r[0] || '').split('/').pop().slice(0, 20));
+                    const added = rows.map(r => r[1] || 0);
+                    const deleted = rows.map(r => r[2] || 0);
+                    Plotly.newPlot('codeChurnChart', [
+                        { x: added, y: repos, type: 'bar', orientation: 'h', name: 'Added', marker: { color: 'rgba(255,255,255,0.8)' } },
+                        { x: deleted, y: repos, type: 'bar', orientation: 'h', name: 'Deleted', marker: { color: 'rgba(255,255,255,0.3)' } }
+                    ], { ...darkLayout, barmode: 'stack', xaxis: { type: 'linear', title: 'Total Churn (LOC)' }, yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
+                }
+            } catch (e) { console.error('Code churn error:', e); }
+
+            // Languages (pie chart)
+            try {
+                const langData = db.exec(`
+                    SELECT language, SUM(bytes) as total_bytes
+                    FROM languages
+                    ${isAll ? '' : `WHERE username = '${username}'`}
+                    GROUP BY language
+                    ORDER BY total_bytes DESC
+                    LIMIT 15
+                `);
+                if (langData.length > 0) {
+                    const rows = langData[0].values;
+                    const langs = rows.map(r => r[0]);
+                    const bytes = rows.map(r => r[1] || 0);
+                    Plotly.newPlot('languagesChart', [{
+                        labels: langs, values: bytes, type: 'pie', hole: 0.4,
+                        textinfo: 'label+percent', textposition: 'outside',
+                        marker: { colors: langs.map((_, i) => `hsl(${i * 24}, 70%, ${50 + (i % 3) * 10}%)`) }
+                    }], { ...darkLayout, showlegend: false, margin: { l: 20, r: 20, t: 20, b: 20 } }, plotConfig);
+                }
+            } catch (e) { console.error('Languages error:', e); }
         }
 
         async function fetchNewUser() {
