@@ -1908,8 +1908,11 @@ ORDER BY date DESC LIMIT 20;`
                 { id: 'locTimelineChart', title: 'Lines of Code Over Time', key: 'loc_timeline' },
                 { id: 'cumulativeLocChart', title: 'Cumulative Lines of Code', key: 'cumulative_loc' },
                 { id: 'commitVelocityChart', title: 'Commit Velocity (Weekly)', key: 'commit_velocity' },
+                { id: 'orgTimelineChart', title: 'Organization Activity Over Time', key: 'org_timeline' },
                 { id: 'langEvolutionChart', title: 'Language Evolution', key: 'lang_evolution' },
                 { id: 'focusChart', title: 'Projects Per Day (Focus Index)', key: 'focus' },
+                { id: 'categoryChart', title: 'Project Categories (AI vs Blockchain vs Web)', key: 'categories' },
+                { id: 'topOrgsChart', title: 'Top Organizations', key: 'top_orgs' },
                 { id: 'commitSizeChart', title: 'Commit Size Distribution', key: 'commit_size' },
                 { id: 'languagesChart', title: 'Languages', key: 'languages' },
                 { id: 'topReposChart', title: 'Top Repositories (by Commits)', key: 'top_repos' },
@@ -1923,7 +1926,7 @@ ORDER BY date DESC LIMIT 20;`
             ];
 
             // Create chart grid for some charts
-            const fullWidthCharts = ['commits_timeline', 'loc_timeline', 'cumulative_loc', 'commit_velocity', 'lang_evolution', 'focus', 'heatmap'];
+            const fullWidthCharts = ['commits_timeline', 'loc_timeline', 'cumulative_loc', 'commit_velocity', 'org_timeline', 'lang_evolution', 'focus', 'heatmap'];
             const gridCharts = charts.filter(c => !fullWidthCharts.includes(c.key));
             const wideCharts = charts.filter(c => fullWidthCharts.includes(c.key));
 
@@ -2246,6 +2249,145 @@ ORDER BY date DESC LIMIT 20;`
                     }, plotConfig);
                 }
             } catch (e) { console.error('Focus index error:', e); }
+
+            // Top Organizations (bar chart)
+            try {
+                const orgData = db.exec(`
+                    SELECT
+                        CASE
+                            WHEN repo LIKE '%/%' THEN SUBSTR(repo, 1, INSTR(repo, '/') - 1)
+                            ELSE 'unknown'
+                        END as org,
+                        COUNT(*) as commits,
+                        SUM(COALESCE(additions, 0)) as additions,
+                        SUM(COALESCE(deletions, 0)) as deletions
+                    FROM commits
+                    WHERE repo IS NOT NULL AND repo != '' ${userFilterAnd}
+                    GROUP BY org
+                    ORDER BY commits DESC
+                    LIMIT 15
+                `);
+                if (orgData.length > 0) {
+                    const rows = orgData[0].values;
+                    const orgs = rows.map(r => r[0]);
+                    const commits = rows.map(r => r[1]);
+                    Plotly.newPlot('topOrgsChart', [{
+                        x: commits, y: orgs, type: 'bar', orientation: 'h',
+                        marker: { color: 'rgba(255,255,255,0.7)' },
+                        text: commits.map(c => c.toLocaleString()),
+                        textposition: 'auto'
+                    }], {
+                        ...darkLayout,
+                        xaxis: { ...darkLayout.xaxis, title: 'Commits', type: 'linear' },
+                        yaxis: { type: 'category', autorange: 'reversed' },
+                        margin: { l: 100, r: 20, t: 20, b: 40 }
+                    }, plotConfig);
+                }
+            } catch (e) { console.error('Top orgs error:', e); }
+
+            // Project Categories (AI vs Blockchain vs Web)
+            try {
+                // Categorize organizations
+                const catMapping = {
+                    'hanzoai': 'AI', 'hanzo-ai': 'AI', 'zooai': 'AI', 'zoo-labs': 'AI', 'zenlm': 'AI',
+                    'luxfi': 'Blockchain', 'lux-network': 'Blockchain', 'verus-io': 'Blockchain', 'dmagic': 'Blockchain',
+                    'sakejs': 'Web', 'shopjs': 'Web', 'crowdstart': 'Web', 'shortcake': 'Web'
+                };
+                const catData = db.exec(`
+                    SELECT
+                        CASE
+                            WHEN repo LIKE '%/%' THEN LOWER(SUBSTR(repo, 1, INSTR(repo, '/') - 1))
+                            ELSE 'unknown'
+                        END as org,
+                        COUNT(*) as commits
+                    FROM commits
+                    WHERE repo IS NOT NULL AND repo != '' ${userFilterAnd}
+                    GROUP BY org
+                `);
+                if (catData.length > 0) {
+                    const categories = { 'AI': 0, 'Blockchain': 0, 'Web': 0, 'Personal/Other': 0 };
+                    catData[0].values.forEach(row => {
+                        const org = row[0];
+                        const commits = row[1];
+                        const cat = catMapping[org] || 'Personal/Other';
+                        categories[cat] += commits;
+                    });
+                    const labels = Object.keys(categories).filter(k => categories[k] > 0);
+                    const values = labels.map(k => categories[k]);
+                    Plotly.newPlot('categoryChart', [{
+                        labels: labels, values: values, type: 'pie',
+                        marker: {
+                            colors: labels.map(l =>
+                                l === 'AI' ? '#8b5cf6' :
+                                l === 'Blockchain' ? '#f59e0b' :
+                                l === 'Web' ? '#10b981' : '#6b7280'
+                            )
+                        },
+                        textinfo: 'label+percent',
+                        textfont: { color: '#fff' },
+                        hoverinfo: 'label+value+percent'
+                    }], { ...darkLayout, showlegend: true, legend: { font: { color: '#fff' } } }, plotConfig);
+                }
+            } catch (e) { console.error('Categories error:', e); }
+
+            // Organization Activity Over Time (stacked area)
+            try {
+                const orgTimeData = db.exec(`
+                    SELECT
+                        strftime('%Y-%m', date) as month,
+                        CASE
+                            WHEN repo LIKE '%/%' THEN SUBSTR(repo, 1, INSTR(repo, '/') - 1)
+                            ELSE 'other'
+                        END as org,
+                        COUNT(*) as commits
+                    FROM commits
+                    WHERE repo IS NOT NULL ${userFilterAnd}
+                    GROUP BY month, org
+                    ORDER BY month
+                `);
+                if (orgTimeData.length > 0) {
+                    const rows = orgTimeData[0].values;
+                    // Get top 8 organizations by total commits
+                    const orgTotals = {};
+                    rows.forEach(r => {
+                        orgTotals[r[1]] = (orgTotals[r[1]] || 0) + r[2];
+                    });
+                    const topOrgs = Object.entries(orgTotals)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 8)
+                        .map(e => e[0]);
+
+                    // Build data by month and org
+                    const months = [...new Set(rows.map(r => r[0]))].sort();
+                    const orgTraces = {};
+                    topOrgs.forEach(org => {
+                        orgTraces[org] = new Array(months.length).fill(0);
+                    });
+                    rows.forEach(r => {
+                        const monthIdx = months.indexOf(r[0]);
+                        if (topOrgs.includes(r[1]) && monthIdx >= 0) {
+                            orgTraces[r[1]][monthIdx] = r[2];
+                        }
+                    });
+
+                    const colors = ['#fff', '#ddd', '#bbb', '#999', '#777', '#555', '#444', '#333'];
+                    const traces = topOrgs.map((org, i) => ({
+                        x: months.map(m => m + '-01'),
+                        y: orgTraces[org],
+                        name: org,
+                        stackgroup: 'one',
+                        fillcolor: colors[i] || colors[colors.length - 1],
+                        line: { width: 0 }
+                    }));
+
+                    Plotly.newPlot('orgTimelineChart', traces, {
+                        ...darkLayout,
+                        xaxis: { ...darkLayout.xaxis, type: 'date' },
+                        yaxis: { ...darkLayout.yaxis, title: 'Commits' },
+                        legend: { orientation: 'h', y: 1.1, font: { color: '#fff' } }
+                    }, plotConfig);
+                }
+            } catch (e) { console.error('Org timeline error:', e); }
 
             // Commit Size Distribution (histogram)
             try {
