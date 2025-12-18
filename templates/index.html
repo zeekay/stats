@@ -1839,6 +1839,10 @@ ORDER BY date DESC LIMIT 20;`
             const container = document.getElementById('statsGrid');
             const netLoc = stats.net_loc_change || 0;
 
+            const locCoverage = stats.with_loc && stats.total_commits
+                ? Math.round((stats.with_loc / stats.total_commits) * 100) : 0;
+            const firstYear = stats.first_commit ? stats.first_commit.slice(0, 4) : '-';
+
             const statCards = [
                 { label: 'Years Coding', value: stats.years_coding || 0, cls: 'positive' },
                 { label: 'Active Days', value: formatNumber(stats.active_days || 0), cls: 'positive' },
@@ -1850,6 +1854,8 @@ ORDER BY date DESC LIMIT 20;`
                 { label: 'Current Streak', value: stats.current_streak || 0, cls: 'positive' },
                 { label: 'Longest Streak', value: stats.longest_streak || 0, cls: 'positive' },
                 { label: 'Best Day', value: stats.most_productive_day || '-', cls: 'positive' },
+                { label: 'First Commit', value: firstYear, cls: 'positive' },
+                { label: 'LOC Coverage', value: locCoverage + '%', cls: 'positive' },
             ];
 
             container.innerHTML = statCards.map(card => `
