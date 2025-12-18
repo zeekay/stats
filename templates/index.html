@@ -2568,6 +2568,7 @@ ORDER BY date DESC LIMIT 20;`
 
             try {
                 const eventSource = new EventSource(`/api/fetch/${username}`);
+                let streamEnded = false;
 
                 eventSource.onmessage = (event) => {
                     const data = JSON.parse(event.data);
@@ -2578,6 +2579,7 @@ ORDER BY date DESC LIMIT 20;`
                     progressLog.scrollTop = progressLog.scrollHeight;
 
                     if (data.status === 'complete') {
+                        streamEnded = true;
                         eventSource.close();
                         btn.disabled = false;
                         btn.textContent = '+ Add User';
@@ -2594,6 +2596,7 @@ ORDER BY date DESC LIMIT 20;`
                             }
                         }, 500);
                     } else if (data.status === 'error') {
+                        streamEnded = true;
                         eventSource.close();
                         btn.disabled = false;
                         btn.textContent = '+ Add User';
@@ -2604,10 +2607,12 @@ ORDER BY date DESC LIMIT 20;`
                     eventSource.close();
                     btn.disabled = false;
                     btn.textContent = '+ Add User';
-                    const p = document.createElement('p');
-                    p.textContent = 'Connection lost';
-                    p.className = 'status-error';
-                    progressLog.appendChild(p);
+                    if (!streamEnded) {
+                        const p = document.createElement('p');
+                        p.textContent = 'Connection lost';
+                        p.className = 'status-error';
+                        progressLog.appendChild(p);
+                    }
                 };
             } catch (error) {
                 btn.disabled = false;
