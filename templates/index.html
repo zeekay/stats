@@ -1783,9 +1783,8 @@ ORDER BY date DESC LIMIT 20;`
                 if (data.success) {
                     allData = data;
                     setupUserButtons(data.users, data.data);
-                    if (data.users.length > 0) {
-                        selectUser(data.users[0]);
-                    }
+                    // Keep all users selected by default (shows combined view with multi-avatar)
+                    updateView();
                 } else {
                     showError(data.error || 'Failed to fetch data');
                 }
