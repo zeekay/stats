@@ -712,23 +712,27 @@ def create_visualizations(data: dict) -> dict:
     viz = {}
     
     # Daily commits line chart
+    today = pd.Timestamp.now().normalize()
     if data.get('daily'):
         df = pd.DataFrame(data['daily'])
         df['date'] = pd.to_datetime(df['date'])
+        df = df[df['date'] <= today]  # Filter to today
         df['commits_7d'] = df['commits'].rolling(7, min_periods=1).mean()
         df['commits_30d'] = df['commits'].rolling(30, min_periods=1).mean()
-        
+
+        min_date = df['date'].min() if len(df) > 0 else today
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df['date'], y=df['commits'], mode='lines', 
+        fig.add_trace(go.Scatter(x=df['date'], y=df['commits'], mode='lines',
                                 name='Daily', line=dict(color='rgba(255,255,255,0.2)', width=1)))
-        fig.add_trace(go.Scatter(x=df['date'], y=df['commits_7d'], mode='lines', 
+        fig.add_trace(go.Scatter(x=df['date'], y=df['commits_7d'], mode='lines',
                                 name='7-day avg', line=dict(color='#fff', width=2)))
-        fig.add_trace(go.Scatter(x=df['date'], y=df['commits_30d'], mode='lines', 
+        fig.add_trace(go.Scatter(x=df['date'], y=df['commits_30d'], mode='lines',
                                 name='30-day avg', line=dict(color='rgba(255,255,255,0.5)', width=2, dash='dash')))
         fig.update_layout(
             template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color='#fff'), margin=dict(l=40, r=20, t=20, b=40),
-            xaxis=dict(gridcolor='#262626'), yaxis=dict(gridcolor='#262626'),
+            xaxis=dict(gridcolor='#262626', range=[min_date, today]),
+            yaxis=dict(gridcolor='#262626'),
             legend=dict(orientation='h', y=1.1)
         )
         viz['commits_timeline'] = fig.to_json()
@@ -737,20 +741,26 @@ def create_visualizations(data: dict) -> dict:
     if data.get('daily'):
         df = pd.DataFrame(data['daily'])
         df['date'] = pd.to_datetime(df['date'])
+        # Filter to only dates up to today
+        today = pd.Timestamp.now().normalize()
+        df = df[df['date'] <= today]
         df['net'] = df['additions'] - df['deletions']
         df['net_30d'] = df['net'].rolling(30, min_periods=1).mean()
-        
+
         fig = go.Figure()
-        fig.add_trace(go.Bar(x=df['date'], y=df['additions'], name='Added', 
+        fig.add_trace(go.Bar(x=df['date'], y=df['additions'], name='Added',
                             marker_color='rgba(255,255,255,0.7)'))
-        fig.add_trace(go.Bar(x=df['date'], y=-df['deletions'], name='Deleted', 
+        fig.add_trace(go.Bar(x=df['date'], y=-df['deletions'], name='Deleted',
                             marker_color='rgba(255,255,255,0.3)'))
-        fig.add_trace(go.Scatter(x=df['date'], y=df['net_30d'], mode='lines', 
+        fig.add_trace(go.Scatter(x=df['date'], y=df['net_30d'], mode='lines',
                                 name='Net (30d)', line=dict(color='#fff', width=3)))
+        # Set x-axis range to end at today
+        min_date = df['date'].min() if len(df) > 0 else today
         fig.update_layout(
             template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color='#fff'), margin=dict(l=40, r=20, t=20, b=40), barmode='relative',
-            xaxis=dict(gridcolor='#262626'), yaxis=dict(gridcolor='#262626'),
+            xaxis=dict(gridcolor='#262626', range=[min_date, today]),
+            yaxis=dict(gridcolor='#262626'),
             legend=dict(orientation='h', y=1.1)
         )
         viz['loc_timeline'] = fig.to_json()
