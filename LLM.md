@@ -5,6 +5,24 @@ Flask web app that shows **real GitHub contribution statistics** including actua
 
 **Live Site**: https://zeekay.github.io/stats/
 
+## Related Packages (Dec 2024)
+
+### @hanzo/stats (`~/work/hanzo/stats/`)
+SQL-powered stats dashboard library with client-side SQLite, chart configs, and data providers.
+- **StatsDB**: sql.js wrapper for browser-side SQLite queries
+- **Hooks**: `useStatsDB`, `useQuery`, `useGitHubStats`, `useAIStats`
+- **Components**: `StatCard`, `StatsGrid`, `SQLConsole`, `QueryResults`
+- **Providers**: GitHub, AI, StackOverflow, Spotify, SoundCloud
+- **Charts**: Default chart configs with Recharts/Plotly themes
+
+### @hanzo/home (`~/work/hanzo/home/`)
+Forkable Next.js 15 personal homepage template using @hanzo/stats.
+- **Features**: GitHub stats, AI usage, music embeds, SQL console
+- **Config**: `stats.config.ts` for personalization
+- **Components**: Hero, Tabs, OverviewTab, CodeTab, MusicTab, SocialTab, QueryTab
+- **API Routes**: `/api/github/stats`, `/api/ai/stats`
+- **Sync Script**: `npm run sync` fetches GitHub data to stats.db
+
 ## Current Stats (Dec 2024)
 - **37,047 total commits** (zeekay: 31,786, hanzo-dev: 5,261)
 - **40%+ LOC coverage** (14,874 commits with detailed LOC data)
