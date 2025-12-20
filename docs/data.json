@@ -21464,7 +21464,46 @@
             "net_loc": 45160550,
             "days_active": 245
           }
-        }
+        },
+        "periods": {
+          "7d": {
+            "commits": 553,
+            "additions": 799480,
+            "deletions": 1473295,
+            "active_days": 6,
+            "repos": 65
+          },
+          "30d": {
+            "commits": 1639,
+            "additions": 4855543,
+            "deletions": 5172475,
+            "active_days": 27,
+            "repos": 107
+          },
+          "90d": {
+            "commits": 4030,
+            "additions": 41711617,
+            "deletions": 30029129,
+            "active_days": 81,
+            "repos": 277
+          },
+          "ytd": {
+            "commits": 8230,
+            "additions": 83343922,
+            "deletions": 38183372,
+            "active_days": 245,
+            "repos": 394
+          },
+          "1y": {
+            "commits": 8250,
+            "additions": 83434773,
+            "deletions": 38192385,
+            "active_days": 250,
+            "repos": 395
+          }
+        },
+        "additions_30d_change": -84.0,
+        "deletions_30d_change": -78.0
       },
       "daily": [
         {

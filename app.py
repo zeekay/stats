@@ -1088,6 +1088,53 @@ def get_combined_stats(usernames: list) -> dict:
             'net_loc': row['additions'] - row['deletions'], 'days_active': row['days_active']
         }
 
+    # Period stats (7d, 30d, 90d, ytd, 1y)
+    today = datetime.now()
+    year_start = f'{today.year}-01-01'
+    periods = {
+        '7d': (today - timedelta(days=7)).strftime('%Y-%m-%d'),
+        '30d': (today - timedelta(days=30)).strftime('%Y-%m-%d'),
+        '90d': (today - timedelta(days=90)).strftime('%Y-%m-%d'),
+        'ytd': year_start,
+        '1y': (today - timedelta(days=365)).strftime('%Y-%m-%d'),
+    }
+
+    period_stats = {}
+    for period, start_date in periods.items():
+        stats = conn.execute(f'''
+            SELECT
+                COUNT(*) as commits,
+                COALESCE(SUM(additions), 0) as additions,
+                COALESCE(SUM(deletions), 0) as deletions,
+                COUNT(DISTINCT date) as active_days,
+                COUNT(DISTINCT repo) as repos
+            FROM commits WHERE username IN ({placeholders}) AND date >= ?
+        ''', usernames + [start_date]).fetchone()
+        period_stats[period] = dict(stats)
+
+    # 30-day comparison for change calculation
+    thirty_days_ago = periods['30d']
+    sixty_days_ago = (today - timedelta(days=60)).strftime('%Y-%m-%d')
+
+    prev_30d = conn.execute(f'''
+        SELECT COALESCE(SUM(additions), 0) as adds, COALESCE(SUM(deletions), 0) as dels
+        FROM commits WHERE username IN ({placeholders}) AND date >= ? AND date < ?
+    ''', usernames + [sixty_days_ago, thirty_days_ago]).fetchone()
+
+    # Calculate percentage change
+    additions_30d_change = 0
+    deletions_30d_change = 0
+    last_30d_adds = period_stats['30d']['additions']
+    last_30d_dels = period_stats['30d']['deletions']
+    if prev_30d['adds'] > 0:
+        additions_30d_change = round(((last_30d_adds - prev_30d['adds']) / prev_30d['adds']) * 100, 0)
+    elif last_30d_adds > 0:
+        additions_30d_change = 100
+    if prev_30d['dels'] > 0:
+        deletions_30d_change = round(((last_30d_dels - prev_30d['dels']) / prev_30d['dels']) * 100, 0)
+    elif last_30d_dels > 0:
+        deletions_30d_change = 100
+
     conn.close()
 
     first_date = datetime.strptime(dates['first'], '%Y-%m-%d') if dates['first'] else datetime.now()
@@ -1108,7 +1155,10 @@ def get_combined_stats(usernames: list) -> dict:
         'longest_streak': longest_streak,
         'most_productive_day': dow_stats[0]['day'] if dow_stats else None,
         'day_of_week_stats': {r['day']: r['commits'] for r in dow_stats},
-        'yearly': yearly
+        'yearly': yearly,
+        'periods': period_stats,
+        'additions_30d_change': additions_30d_change,
+        'deletions_30d_change': deletions_30d_change,
     }
 
 
