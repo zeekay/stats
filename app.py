@@ -1002,6 +1002,8 @@ def index():
 
 def get_combined_stats(usernames: list) -> dict:
     """Get combined stats across multiple users."""
+    if not usernames:
+        raise ValueError("usernames list cannot be empty")
     conn = analyzer.db._get_conn()
 
     # Combined totals
@@ -1120,6 +1122,10 @@ def get_combined_stats(usernames: list) -> dict:
         SELECT COALESCE(SUM(additions), 0) as adds, COALESCE(SUM(deletions), 0) as dels
         FROM commits WHERE username IN ({placeholders}) AND date >= ? AND date < ?
     ''', usernames + [sixty_days_ago, thirty_days_ago]).fetchone()
+
+    # Handle empty result
+    if not prev_30d:
+        prev_30d = {'adds': 0, 'dels': 0}
 
     # Calculate percentage change
     additions_30d_change = 0
@@ -1585,10 +1591,13 @@ def export_static_site(output_dir: Path):
     html = html.replace('<script>', injection + '<script>', 1)
     
     # Modify initApp fetch to use static data (be specific to avoid breaking initSqlDatabase)
+    html_before = html
     html = html.replace(
         "const response = await fetch('/api/data');",
         "if (window.STATIC_DATA) { allData = window.STATIC_DATA; setupUserButtons(allData.users, allData.data); updateView(); return; }\n            const response = await fetch('/api/data');"
     )
+    if html == html_before:
+        print("  Warning: Static data injection pattern not found!")
     
     # Update title
     user_names = [u for u in active_users if u != 'All']
