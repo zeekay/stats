@@ -2007,8 +2007,8 @@ ORDER BY date DESC LIMIT 20;`
                     <h3>Lines Added</h3>
                     <div class="big-number additions">+${formatNumber(stats.total_additions)}</div>
                     <div class="period-label">
-                        <span class="stat-change ${(stats.additions_30d_change || 0) >= 0 ? 'up' : 'down'}">
-                            ${formatChange(stats.additions_30d_change)} vs prev 30d
+                        <span class="stat-change up">
+                            +${formatNumber(stats.periods?.['30d']?.additions || 0)} last 30d
                         </span>
                     </div>
                 </div>
@@ -2016,8 +2016,8 @@ ORDER BY date DESC LIMIT 20;`
                     <h3>Lines Deleted</h3>
                     <div class="big-number deletions">-${formatNumber(stats.total_deletions)}</div>
                     <div class="period-label">
-                        <span class="stat-change ${(stats.deletions_30d_change || 0) >= 0 ? 'up' : 'down'}">
-                            ${formatChange(stats.deletions_30d_change)} vs prev 30d
+                        <span class="stat-change down">
+                            -${formatNumber(stats.periods?.['30d']?.deletions || 0)} last 30d
                         </span>
                     </div>
                 </div>
