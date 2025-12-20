@@ -1797,7 +1797,7 @@ ORDER BY date DESC LIMIT 20;`
         async function initApp() {
             showLoading();
             try {
-                if (window.STATIC_DATA) { allData = window.STATIC_DATA; setupUserButtons(allData.users); if (allData.users.length > 0) selectUser(allData.users[0]); return; }
+                if (window.STATIC_DATA) { allData = window.STATIC_DATA; setupUserButtons(allData.users, allData.data); updateView(); return; }
             const response = await fetch('/api/data');
                 const data = await response.json();
 
@@ -2872,7 +2872,7 @@ ORDER BY date DESC LIMIT 20;`
 
                         // Refresh data
                         setTimeout(async () => {
-                            if (window.STATIC_DATA) { allData = window.STATIC_DATA; setupUserButtons(allData.users); if (allData.users.length > 0) selectUser(allData.users[0]); return; }
+                            if (window.STATIC_DATA) { allData = window.STATIC_DATA; setupUserButtons(allData.users, allData.data); updateView(); return; }
             const response = await fetch('/api/data');
                             const newData = await response.json();
                             if (newData.success) {

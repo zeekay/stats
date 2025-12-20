@@ -1587,7 +1587,7 @@ def export_static_site(output_dir: Path):
     # Modify initApp fetch to use static data (be specific to avoid breaking initSqlDatabase)
     html = html.replace(
         "const response = await fetch('/api/data');",
-        "if (window.STATIC_DATA) { allData = window.STATIC_DATA; setupUserButtons(allData.users); if (allData.users.length > 0) selectUser(allData.users[0]); return; }\n            const response = await fetch('/api/data');"
+        "if (window.STATIC_DATA) { allData = window.STATIC_DATA; setupUserButtons(allData.users, allData.data); updateView(); return; }\n            const response = await fetch('/api/data');"
     )
     
     # Update title
