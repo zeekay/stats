@@ -1095,27 +1095,44 @@
             border: 1px solid var(--border);
         }
 
-        /* Detail Modal */
-        .detail-modal {
+        /* Detail Full Page View */
+        .detail-view {
             display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.85);
-            z-index: 1000;
-            overflow-y: auto;
-            padding: 2rem;
+            min-height: 100vh;
+            background: var(--background);
+            padding: 1rem 2rem 2rem;
         }
-        .detail-modal.active { display: block; }
-        .detail-modal-content {
-            max-width: 900px;
+        .detail-view.active { display: block; }
+        .main-view.hidden { display: none; }
+        .detail-view-content {
+            max-width: 1400px;
             margin: 0 auto;
+        }
+        .detail-back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--secondary);
+            color: var(--foreground);
+            text-decoration: none;
+            border-radius: var(--radius);
+            font-size: 0.875rem;
+            border: 1px solid var(--border);
+            cursor: pointer;
+            margin-bottom: 1.5rem;
+            transition: all 150ms;
+        }
+        .detail-back-btn:hover {
+            background: var(--primary);
+            color: var(--primary-foreground);
+        }
+        .detail-hero {
             background: var(--card);
             border: 1px solid var(--border);
             border-radius: var(--radius);
             padding: 2rem;
+            margin-bottom: 2rem;
         }
         .detail-header {
             display: flex;
@@ -1137,15 +1154,6 @@
             text-decoration: none;
         }
         .detail-title a:hover { color: var(--muted-foreground); }
-        .detail-close {
-            background: none;
-            border: none;
-            color: var(--muted-foreground);
-            font-size: 1.5rem;
-            cursor: pointer;
-            padding: 0.5rem;
-        }
-        .detail-close:hover { color: var(--foreground); }
         .detail-meta {
             color: var(--muted-foreground);
             font-size: 0.875rem;
@@ -1242,7 +1250,31 @@
             font-size: 0.75rem;
             color: var(--muted-foreground);
         }
-        .detail-chart { height: 200px; margin-bottom: 1rem; }
+        .detail-chart { height: 300px; margin-bottom: 1rem; }
+        .detail-charts-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
+        .detail-chart-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+        }
+        .detail-chart-card h3 {
+            font-size: 1rem;
+            margin-bottom: 1rem;
+            color: var(--muted-foreground);
+        }
+        .detail-chart-full {
+            grid-column: span 2;
+        }
+        @media (max-width: 900px) {
+            .detail-charts-grid { grid-template-columns: 1fr; }
+            .detail-chart-full { grid-column: span 1; }
+        }
         .detail-commits-list {
             max-height: 200px;
             overflow-y: auto;
@@ -1263,34 +1295,42 @@
     </style>
 </head>
 <body>
-    <!-- Detail Modal -->
-    <div id="detailModal" class="detail-modal" onclick="if(event.target===this)closeDetailModal()">
-        <div class="detail-modal-content">
-            <div class="detail-header">
-                <div>
-                    <div class="detail-title" id="detailTitle"></div>
-                    <div class="detail-meta" id="detailMeta"></div>
+    <!-- Detail Full Page View -->
+    <div id="detailView" class="detail-view">
+        <div class="detail-view-content">
+            <button class="detail-back-btn" onclick="closeDetailView()">← Back to Dashboard</button>
+            <div class="detail-hero">
+                <div class="detail-header">
+                    <div>
+                        <div class="detail-title" id="detailTitle"></div>
+                        <div class="detail-meta" id="detailMeta"></div>
+                    </div>
                 </div>
-                <button class="detail-close" onclick="closeDetailModal()">×</button>
+                <div class="detail-description" id="detailDescription"></div>
+                <div class="detail-actions" id="detailActions"></div>
+                <div class="detail-stats-grid" id="detailStats"></div>
+                <div class="detail-tags" id="detailTags"></div>
             </div>
-            <div class="detail-description" id="detailDescription"></div>
-            <div class="detail-actions" id="detailActions"></div>
-            <div class="detail-stats-grid" id="detailStats"></div>
-            <div class="detail-tags" id="detailTags"></div>
+
             <div class="detail-section" id="detailReposSection" style="display:none">
-                <h3>Repositories</h3>
+                <h3 style="font-size:1.25rem;margin-bottom:1rem;">Repositories</h3>
                 <div class="detail-repos-list" id="detailReposList"></div>
             </div>
-            <div class="detail-section">
-                <h3>Activity Over Time</h3>
-                <div class="detail-chart" id="detailActivityChart"></div>
+
+            <div class="detail-charts-grid" id="detailChartsGrid">
+                <!-- Charts will be injected here -->
             </div>
-            <div class="detail-section" id="detailCommitsSection" style="display:none">
-                <h3>Recent Commits</h3>
-                <div class="detail-commits-list" id="detailCommitsList"></div>
+
+            <div class="detail-section" id="detailCommitsSection" style="display:none;margin-top:1.5rem;">
+                <div class="detail-chart-card">
+                    <h3>Recent Commits</h3>
+                    <div class="detail-commits-list" id="detailCommitsList"></div>
+                </div>
             </div>
         </div>
     </div>
+
+    <div id="mainView" class="main-view">
     <div class="container">
         <!-- Profile Header - GitHub style -->
         <div id="profileHeader" class="profile-header" style="display:none">
@@ -1528,6 +1568,7 @@ LIMIT 20;</textarea>
             BSD-3-Clause © Zach Kelling
         </p>
     </footer>
+    </div> <!-- end mainView -->
 
     <script>
         let currentUser = null;
@@ -2000,6 +2041,14 @@ ORDER BY date DESC LIMIT 20;`
                     setupUserButtons(data.users, data.data);
                     // Keep all users selected by default (shows combined view with multi-avatar)
                     updateView();
+
+                    // Check URL parameters for direct detail view
+                    const params = new URLSearchParams(window.location.search);
+                    if (params.has('repo')) {
+                        showRepoDetail(params.get('repo'));
+                    } else if (params.has('org')) {
+                        showOrgDetail(params.get('org'));
+                    }
                 } else {
                     showError(data.error || 'Failed to fetch data');
                 }
@@ -2188,16 +2237,36 @@ ORDER BY date DESC LIMIT 20;`
             return sign + val.toFixed(1) + '%';
         }
 
-        // Detail Modal Functions
-        function closeDetailModal() {
-            document.getElementById('detailModal').classList.remove('active');
-            document.body.style.overflow = '';
+        // Detail Full Page View Functions
+        function closeDetailView() {
+            document.getElementById('detailView').classList.remove('active');
+            document.getElementById('mainView').classList.remove('hidden');
+            window.scrollTo(0, 0);
+            history.pushState({}, '', window.location.pathname);
         }
 
+        function openDetailView() {
+            document.getElementById('detailView').classList.add('active');
+            document.getElementById('mainView').classList.add('hidden');
+            window.scrollTo(0, 0);
+        }
+
+        const chartConfig = {
+            paper_bgcolor: 'transparent',
+            plot_bgcolor: 'transparent',
+            font: { color: '#fff' },
+            margin: { l: 50, r: 30, t: 30, b: 50 },
+            xaxis: { gridcolor: '#262626' },
+            yaxis: { gridcolor: '#262626' }
+        };
+
         async function showRepoDetail(repoName) {
-            const modal = document.getElementById('detailModal');
-            modal.classList.add('active');
-            document.body.style.overflow = 'hidden';
+            openDetailView();
+            history.pushState({}, '', `?repo=${encodeURIComponent(repoName)}`);
+
+            // Ensure database is initialized
+            if (!db) await initSqlDatabase();
+            if (!db) return;
 
             // Query local db for repo data
             const repoData = db.exec(`
@@ -2216,10 +2285,10 @@ ORDER BY date DESC LIMIT 20;`
             const topics = topicsData.length > 0 ? topicsData[0].values.map(r => r[0]) : [];
 
             // Get languages
-            const langData = db.exec(`SELECT language, bytes FROM languages WHERE repo = '${repoName.replace(/'/g, "''")}' ORDER BY bytes DESC LIMIT 5`);
+            const langData = db.exec(`SELECT language, bytes FROM languages WHERE repo = '${repoName.replace(/'/g, "''")}' ORDER BY bytes DESC LIMIT 10`);
             const languages = langData.length > 0 ? langData[0].values : [];
 
-            // Render
+            // Render header
             document.getElementById('detailTitle').innerHTML = `
                 <a href="https://github.com/${repoName}" target="_blank">📦 ${name}</a>
                 ${org ? `<span style="color:var(--muted-foreground);font-size:0.875rem">by ${org}</span>` : ''}
@@ -2252,13 +2321,37 @@ ORDER BY date DESC LIMIT 20;`
             document.getElementById('detailCommitsSection').style.display = 'block';
 
             // Recent commits
-            const recentData = db.exec(`SELECT date, message FROM commits WHERE repo = '${repoName.replace(/'/g, "''")}' ORDER BY date DESC LIMIT 10`);
+            const recentData = db.exec(`SELECT date, message FROM commits WHERE repo = '${repoName.replace(/'/g, "''")}' ORDER BY date DESC LIMIT 15`);
             const recentCommits = recentData.length > 0 ? recentData[0].values : [];
             document.getElementById('detailCommitsList').innerHTML = recentCommits.map(c =>
-                `<div class="detail-commit"><span class="detail-commit-date">${c[0]}</span> ${(c[1]||'').slice(0,80)}${(c[1]||'').length>80?'...':''}</div>`
+                `<div class="detail-commit"><span class="detail-commit-date">${c[0]}</span> ${(c[1]||'').slice(0,100)}${(c[1]||'').length>100?'...':''}</div>`
             ).join('');
 
-            // Activity chart
+            // Build charts grid
+            document.getElementById('detailChartsGrid').innerHTML = `
+                <div class="detail-chart-card detail-chart-full">
+                    <h3>Commits Over Time</h3>
+                    <div class="detail-chart" id="repoCommitsChart"></div>
+                </div>
+                <div class="detail-chart-card">
+                    <h3>Lines of Code Over Time</h3>
+                    <div class="detail-chart" id="repoLOCChart"></div>
+                </div>
+                <div class="detail-chart-card">
+                    <h3>Languages</h3>
+                    <div class="detail-chart" id="repoLangChart"></div>
+                </div>
+                <div class="detail-chart-card">
+                    <h3>Activity by Day of Week</h3>
+                    <div class="detail-chart" id="repoDayChart"></div>
+                </div>
+                <div class="detail-chart-card">
+                    <h3>Activity by Hour</h3>
+                    <div class="detail-chart" id="repoHourChart"></div>
+                </div>
+            `;
+
+            // Commits over time chart
             const monthlyData = db.exec(`
                 SELECT strftime('%Y-%m', date) as month, COUNT(*) as commits
                 FROM commits WHERE repo = '${repoName.replace(/'/g, "''")}' GROUP BY month ORDER BY month
@@ -2266,21 +2359,77 @@ ORDER BY date DESC LIMIT 20;`
             if (monthlyData.length > 0) {
                 const months = monthlyData[0].values.map(r => r[0]);
                 const commits = monthlyData[0].values.map(r => r[1]);
-                Plotly.newPlot('detailActivityChart', [{
+                Plotly.newPlot('repoCommitsChart', [{
                     x: months, y: commits, type: 'bar',
-                    marker: { color: 'rgba(255,255,255,0.8)' }
-                }], {
-                    paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
-                    font: { color: '#fff' }, margin: { l: 40, r: 20, t: 10, b: 40 },
-                    xaxis: { gridcolor: '#262626' }, yaxis: { gridcolor: '#262626' }
-                }, { displayModeBar: false });
+                    marker: { color: 'rgba(59, 130, 246, 0.8)' }
+                }], {...chartConfig, xaxis: {...chartConfig.xaxis, title: 'Month'}, yaxis: {...chartConfig.yaxis, title: 'Commits'}}, { displayModeBar: false });
+            }
+
+            // LOC over time
+            const locData = db.exec(`
+                SELECT strftime('%Y-%m', date) as month,
+                       SUM(additions) as adds, SUM(deletions) as dels
+                FROM commits WHERE repo = '${repoName.replace(/'/g, "''")}' GROUP BY month ORDER BY month
+            `);
+            if (locData.length > 0) {
+                const months = locData[0].values.map(r => r[0]);
+                const adds = locData[0].values.map(r => r[1]);
+                const dels = locData[0].values.map(r => -r[2]);
+                Plotly.newPlot('repoLOCChart', [
+                    { x: months, y: adds, type: 'bar', name: 'Added', marker: { color: 'rgba(34,197,94,0.8)' } },
+                    { x: months, y: dels, type: 'bar', name: 'Deleted', marker: { color: 'rgba(239,68,68,0.8)' } }
+                ], {...chartConfig, barmode: 'relative'}, { displayModeBar: false });
+            }
+
+            // Languages pie chart
+            if (languages.length > 0) {
+                Plotly.newPlot('repoLangChart', [{
+                    labels: languages.map(l => l[0]),
+                    values: languages.map(l => l[1]),
+                    type: 'pie',
+                    textinfo: 'label+percent',
+                    marker: { colors: ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#06b6d4','#84cc16'] }
+                }], {...chartConfig, showlegend: false}, { displayModeBar: false });
+            }
+
+            // Activity by day of week
+            const dayData = db.exec(`
+                SELECT CAST(strftime('%w', date) AS INTEGER) as dow, COUNT(*) as cnt
+                FROM commits WHERE repo = '${repoName.replace(/'/g, "''")}' GROUP BY dow ORDER BY dow
+            `);
+            if (dayData.length > 0) {
+                const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+                const dayValues = new Array(7).fill(0);
+                dayData[0].values.forEach(r => { dayValues[r[0]] = r[1]; });
+                Plotly.newPlot('repoDayChart', [{
+                    x: days, y: dayValues, type: 'bar',
+                    marker: { color: 'rgba(139, 92, 246, 0.8)' }
+                }], chartConfig, { displayModeBar: false });
+            }
+
+            // Activity by hour
+            const hourData = db.exec(`
+                SELECT CAST(strftime('%H', date) AS INTEGER) as hour, COUNT(*) as cnt
+                FROM commits WHERE repo = '${repoName.replace(/'/g, "''")}' AND date IS NOT NULL GROUP BY hour ORDER BY hour
+            `);
+            if (hourData.length > 0 && hourData[0].values.length > 0) {
+                const hourValues = new Array(24).fill(0);
+                hourData[0].values.forEach(r => { hourValues[r[0]] = r[1]; });
+                Plotly.newPlot('repoHourChart', [{
+                    x: Array.from({length:24}, (_,i) => `${i}:00`),
+                    y: hourValues, type: 'bar',
+                    marker: { color: 'rgba(236, 72, 153, 0.8)' }
+                }], chartConfig, { displayModeBar: false });
             }
         }
 
         async function showOrgDetail(orgName) {
-            const modal = document.getElementById('detailModal');
-            modal.classList.add('active');
-            document.body.style.overflow = 'hidden';
+            openDetailView();
+            history.pushState({}, '', `?org=${encodeURIComponent(orgName)}`);
+
+            // Ensure database is initialized
+            if (!db) await initSqlDatabase();
+            if (!db) return;
 
             // Query local db for org data
             const orgData = db.exec(`
@@ -2294,17 +2443,21 @@ ORDER BY date DESC LIMIT 20;`
 
             // Get repos
             const reposData = db.exec(`
-                SELECT repo, COUNT(*) as commits, COALESCE(SUM(additions),0) as adds
+                SELECT repo, COUNT(*) as commits, COALESCE(SUM(additions),0) as adds, COALESCE(SUM(deletions),0) as dels
                 FROM commits WHERE repo LIKE '${orgName}/%'
-                GROUP BY repo ORDER BY commits DESC LIMIT 20
+                GROUP BY repo ORDER BY commits DESC LIMIT 30
             `);
             const repos = reposData.length > 0 ? reposData[0].values : [];
 
             // Get topics across all repos
-            const topicsData = db.exec(`SELECT topic, COUNT(*) as cnt FROM topics WHERE repo LIKE '${orgName}/%' GROUP BY topic ORDER BY cnt DESC LIMIT 15`);
+            const topicsData = db.exec(`SELECT topic, COUNT(*) as cnt FROM topics WHERE repo LIKE '${orgName}/%' GROUP BY topic ORDER BY cnt DESC LIMIT 20`);
             const topics = topicsData.length > 0 ? topicsData[0].values.map(r => r[0]) : [];
 
-            // Render
+            // Get languages
+            const langData = db.exec(`SELECT language, SUM(bytes) as bytes FROM languages WHERE repo LIKE '${orgName}/%' GROUP BY language ORDER BY bytes DESC LIMIT 10`);
+            const languages = langData.length > 0 ? langData[0].values : [];
+
+            // Render header
             document.getElementById('detailTitle').innerHTML = `
                 <a href="https://github.com/${orgName}" target="_blank">🏢 ${orgName}</a>
             `;
@@ -2338,7 +2491,35 @@ ORDER BY date DESC LIMIT 20;`
                 </div>`
             ).join('');
 
-            // Activity chart
+            // Build charts grid
+            document.getElementById('detailChartsGrid').innerHTML = `
+                <div class="detail-chart-card detail-chart-full">
+                    <h3>Commits Over Time</h3>
+                    <div class="detail-chart" id="orgCommitsChart"></div>
+                </div>
+                <div class="detail-chart-card">
+                    <h3>Lines of Code Over Time</h3>
+                    <div class="detail-chart" id="orgLOCChart"></div>
+                </div>
+                <div class="detail-chart-card">
+                    <h3>Languages</h3>
+                    <div class="detail-chart" id="orgLangChart"></div>
+                </div>
+                <div class="detail-chart-card">
+                    <h3>Top Repositories (by Commits)</h3>
+                    <div class="detail-chart" id="orgReposChart"></div>
+                </div>
+                <div class="detail-chart-card">
+                    <h3>Activity by Day of Week</h3>
+                    <div class="detail-chart" id="orgDayChart"></div>
+                </div>
+                <div class="detail-chart-card detail-chart-full">
+                    <h3>Repository Activity Over Time</h3>
+                    <div class="detail-chart" id="orgRepoActivityChart"></div>
+                </div>
+            `;
+
+            // Commits over time chart
             const monthlyData = db.exec(`
                 SELECT strftime('%Y-%m', date) as month, COUNT(*) as commits
                 FROM commits WHERE repo LIKE '${orgName}/%' GROUP BY month ORDER BY month
@@ -2346,20 +2527,110 @@ ORDER BY date DESC LIMIT 20;`
             if (monthlyData.length > 0) {
                 const months = monthlyData[0].values.map(r => r[0]);
                 const commits = monthlyData[0].values.map(r => r[1]);
-                Plotly.newPlot('detailActivityChart', [{
+                Plotly.newPlot('orgCommitsChart', [{
                     x: months, y: commits, type: 'bar',
-                    marker: { color: 'rgba(255,255,255,0.8)' }
-                }], {
-                    paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
-                    font: { color: '#fff' }, margin: { l: 40, r: 20, t: 10, b: 40 },
-                    xaxis: { gridcolor: '#262626' }, yaxis: { gridcolor: '#262626' }
-                }, { displayModeBar: false });
+                    marker: { color: 'rgba(59, 130, 246, 0.8)' }
+                }], {...chartConfig, xaxis: {...chartConfig.xaxis, title: 'Month'}, yaxis: {...chartConfig.yaxis, title: 'Commits'}}, { displayModeBar: false });
+            }
+
+            // LOC over time
+            const locData = db.exec(`
+                SELECT strftime('%Y-%m', date) as month,
+                       SUM(additions) as adds, SUM(deletions) as dels
+                FROM commits WHERE repo LIKE '${orgName}/%' GROUP BY month ORDER BY month
+            `);
+            if (locData.length > 0) {
+                const months = locData[0].values.map(r => r[0]);
+                const adds = locData[0].values.map(r => r[1]);
+                const dels = locData[0].values.map(r => -r[2]);
+                Plotly.newPlot('orgLOCChart', [
+                    { x: months, y: adds, type: 'bar', name: 'Added', marker: { color: 'rgba(34,197,94,0.8)' } },
+                    { x: months, y: dels, type: 'bar', name: 'Deleted', marker: { color: 'rgba(239,68,68,0.8)' } }
+                ], {...chartConfig, barmode: 'relative'}, { displayModeBar: false });
+            }
+
+            // Languages pie chart
+            if (languages.length > 0) {
+                Plotly.newPlot('orgLangChart', [{
+                    labels: languages.map(l => l[0]),
+                    values: languages.map(l => l[1]),
+                    type: 'pie',
+                    textinfo: 'label+percent',
+                    marker: { colors: ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#06b6d4','#84cc16'] }
+                }], {...chartConfig, showlegend: false}, { displayModeBar: false });
+            }
+
+            // Top repos bar chart
+            if (repos.length > 0) {
+                const topRepos = repos.slice(0, 10);
+                Plotly.newPlot('orgReposChart', [{
+                    y: topRepos.map(r => r[0].split('/')[1]),
+                    x: topRepos.map(r => r[1]),
+                    type: 'bar',
+                    orientation: 'h',
+                    marker: { color: 'rgba(34,197,94,0.8)' }
+                }], {...chartConfig, yaxis: {...chartConfig.yaxis, autorange: 'reversed'}}, { displayModeBar: false });
+            }
+
+            // Activity by day of week
+            const dayData = db.exec(`
+                SELECT CAST(strftime('%w', date) AS INTEGER) as dow, COUNT(*) as cnt
+                FROM commits WHERE repo LIKE '${orgName}/%' GROUP BY dow ORDER BY dow
+            `);
+            if (dayData.length > 0) {
+                const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+                const dayValues = new Array(7).fill(0);
+                dayData[0].values.forEach(r => { dayValues[r[0]] = r[1]; });
+                Plotly.newPlot('orgDayChart', [{
+                    x: days, y: dayValues, type: 'bar',
+                    marker: { color: 'rgba(139, 92, 246, 0.8)' }
+                }], chartConfig, { displayModeBar: false });
+            }
+
+            // Repository activity over time (stacked)
+            const repoMonthlyData = db.exec(`
+                SELECT repo, strftime('%Y-%m', date) as month, COUNT(*) as commits
+                FROM commits WHERE repo LIKE '${orgName}/%'
+                GROUP BY repo, month ORDER BY month
+            `);
+            if (repoMonthlyData.length > 0) {
+                const topRepoNames = repos.slice(0, 8).map(r => r[0]);
+                const allMonths = [...new Set(repoMonthlyData[0].values.map(r => r[1]))].sort();
+                const traces = topRepoNames.map((repoName, i) => {
+                    const repoData = repoMonthlyData[0].values.filter(r => r[0] === repoName);
+                    const monthMap = {};
+                    repoData.forEach(r => { monthMap[r[1]] = r[2]; });
+                    return {
+                        x: allMonths,
+                        y: allMonths.map(m => monthMap[m] || 0),
+                        name: repoName.split('/')[1],
+                        type: 'scatter',
+                        mode: 'lines',
+                        stackgroup: 'one',
+                        fillcolor: `hsla(${i * 45}, 70%, 50%, 0.7)`
+                    };
+                });
+                Plotly.newPlot('orgRepoActivityChart', traces, {...chartConfig, showlegend: true, legend: {orientation: 'h', y: -0.2}}, { displayModeBar: false });
             }
         }
 
-        // Escape key to close modal
+        // Handle browser back/forward
+        window.addEventListener('popstate', () => {
+            const params = new URLSearchParams(window.location.search);
+            if (params.has('repo')) {
+                showRepoDetail(params.get('repo'));
+            } else if (params.has('org')) {
+                showOrgDetail(params.get('org'));
+            } else {
+                closeDetailView();
+            }
+        });
+
+        // Escape key to close detail view
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeDetailModal();
+            if (e.key === 'Escape' && document.getElementById('detailView').classList.contains('active')) {
+                closeDetailView();
+            }
         });
 
         function displaySummary(userData) {
