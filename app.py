@@ -103,15 +103,32 @@ class StatsDB:
                 FOREIGN KEY (username) REFERENCES users(username)
             );
             
-            -- Repos summary table (aggregated)
+            -- Repos metadata table (aggregated stats + GitHub API metadata)
             CREATE TABLE IF NOT EXISTS repos (
                 repo TEXT PRIMARY KEY,
                 username TEXT NOT NULL,
+                -- Aggregated commit stats
                 commit_count INTEGER DEFAULT 0,
                 additions INTEGER DEFAULT 0,
                 deletions INTEGER DEFAULT 0,
                 first_commit TEXT,
                 last_commit TEXT,
+                -- GitHub API metadata
+                description TEXT,
+                homepage TEXT,
+                stars INTEGER DEFAULT 0,
+                forks INTEGER DEFAULT 0,
+                watchers INTEGER DEFAULT 0,
+                open_issues INTEGER DEFAULT 0,
+                is_fork INTEGER DEFAULT 0,
+                is_archived INTEGER DEFAULT 0,
+                language TEXT,
+                license TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                pushed_at TEXT,
+                default_branch TEXT,
+                fetched_at TEXT,
                 FOREIGN KEY (username) REFERENCES users(username)
             );
             
@@ -852,6 +869,79 @@ class GitHubStatsAnalyzer:
 
         return fetched
 
+    def fetch_repo_metadata(self, username: str, limit: int = None) -> int:
+        """Fetch repository metadata (stars, forks, description) from GitHub."""
+        conn = self.db._get_conn()
+        # Get repos ordered by commit count
+        query = '''
+            SELECT repo, COUNT(*) as commits FROM commits
+            WHERE username = ? AND repo IS NOT NULL AND repo != ''
+            GROUP BY repo ORDER BY commits DESC
+        '''
+        if limit:
+            query += f' LIMIT {limit}'
+        repos = conn.execute(query, (username,)).fetchall()
+        conn.close()
+
+        fetched = 0
+        for row in repos:
+            repo = row[0]
+            # Check if already fetched recently (within 7 days)
+            conn = self.db._get_conn()
+            existing = conn.execute('''
+                SELECT fetched_at FROM repos WHERE repo = ?
+                AND fetched_at > datetime('now', '-7 days')
+            ''', (repo,)).fetchone()
+            conn.close()
+            if existing:
+                continue
+
+            # Fetch from GitHub
+            try:
+                resp = requests.get(
+                    f'https://api.github.com/repos/{repo}',
+                    headers=REST_HEADERS, timeout=10
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    conn = self.db._get_conn()
+                    conn.execute('''
+                        INSERT OR REPLACE INTO repos
+                        (repo, username, description, homepage, stars, forks, watchers,
+                         open_issues, is_fork, is_archived, language, license,
+                         created_at, updated_at, pushed_at, default_branch, fetched_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        repo, username,
+                        data.get('description'),
+                        data.get('homepage'),
+                        data.get('stargazers_count', 0),
+                        data.get('forks_count', 0),
+                        data.get('watchers_count', 0),
+                        data.get('open_issues_count', 0),
+                        1 if data.get('fork') else 0,
+                        1 if data.get('archived') else 0,
+                        data.get('language'),
+                        data.get('license', {}).get('spdx_id') if data.get('license') else None,
+                        data.get('created_at'),
+                        data.get('updated_at'),
+                        data.get('pushed_at'),
+                        data.get('default_branch'),
+                        datetime.now().isoformat()
+                    ))
+                    conn.commit()
+                    conn.close()
+                    fetched += 1
+
+                    if fetched % 20 == 0:
+                        print(f'    Fetched metadata for {fetched} repos')
+
+                time.sleep(REQUEST_DELAY)
+            except Exception as e:
+                print(f'    Error fetching metadata for {repo}: {e}')
+
+        return fetched
+
     def get_user_data(self, username: str, fetch: bool = False) -> dict:
         """Get all data for a user. If fetch=True, fetches new data from GitHub first."""
         if fetch:
@@ -1373,6 +1463,120 @@ def list_users():
     conn.close()
     users = [{'username': r[0], 'avatar_url': r[1], 'name': r[2]} for r in rows]
     return jsonify({'success': True, 'users': users})
+
+
+@app.route('/api/repo/<path:repo_name>')
+def get_repo_details(repo_name):
+    """Get detailed info for a specific repository."""
+    conn = analyzer.db._get_conn()
+
+    # Get commit stats
+    commit_stats = conn.execute('''
+        SELECT COUNT(*) as commits, COALESCE(SUM(additions), 0) as additions,
+               COALESCE(SUM(deletions), 0) as deletions,
+               MIN(date) as first_commit, MAX(date) as last_commit,
+               COUNT(DISTINCT date) as active_days
+        FROM commits WHERE repo = ?
+    ''', (repo_name,)).fetchone()
+
+    # Get metadata from repos table
+    metadata = conn.execute('SELECT * FROM repos WHERE repo = ?', (repo_name,)).fetchone()
+
+    # Get topics
+    topics = [r[0] for r in conn.execute(
+        'SELECT topic FROM topics WHERE repo = ?', (repo_name,)
+    ).fetchall()]
+
+    # Get languages
+    languages = conn.execute('''
+        SELECT language, bytes FROM languages WHERE repo = ? ORDER BY bytes DESC
+    ''', (repo_name,)).fetchall()
+
+    # Get recent commits
+    recent_commits = conn.execute('''
+        SELECT date, message, additions, deletions FROM commits
+        WHERE repo = ? ORDER BY date DESC LIMIT 10
+    ''', (repo_name,)).fetchall()
+
+    # Monthly activity for this repo
+    monthly = conn.execute('''
+        SELECT strftime('%Y-%m', date) as month, COUNT(*) as commits,
+               COALESCE(SUM(additions), 0) as additions
+        FROM commits WHERE repo = ? GROUP BY month ORDER BY month
+    ''', (repo_name,)).fetchall()
+
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'repo': repo_name,
+        'org': repo_name.split('/')[0] if '/' in repo_name else None,
+        'name': repo_name.split('/')[-1] if '/' in repo_name else repo_name,
+        'stats': dict(commit_stats) if commit_stats else {},
+        'metadata': dict(metadata) if metadata else {},
+        'topics': topics,
+        'languages': [{'language': r[0], 'bytes': r[1]} for r in languages],
+        'recent_commits': [{'date': r[0], 'message': r[1], 'additions': r[2], 'deletions': r[3]} for r in recent_commits],
+        'monthly': [{'month': r[0], 'commits': r[1], 'additions': r[2]} for r in monthly],
+        'github_url': f'https://github.com/{repo_name}'
+    })
+
+
+@app.route('/api/org/<org_name>')
+def get_org_details(org_name):
+    """Get aggregated info for an organization."""
+    conn = analyzer.db._get_conn()
+
+    # Get all repos for this org
+    repos = conn.execute('''
+        SELECT repo, COUNT(*) as commits, COALESCE(SUM(additions), 0) as additions,
+               COALESCE(SUM(deletions), 0) as deletions,
+               MIN(date) as first_commit, MAX(date) as last_commit
+        FROM commits
+        WHERE repo LIKE ? || '/%'
+        GROUP BY repo ORDER BY commits DESC
+    ''', (org_name,)).fetchall()
+
+    # Aggregate stats
+    total_stats = conn.execute('''
+        SELECT COUNT(*) as commits, COALESCE(SUM(additions), 0) as additions,
+               COALESCE(SUM(deletions), 0) as deletions,
+               MIN(date) as first_commit, MAX(date) as last_commit,
+               COUNT(DISTINCT repo) as repo_count
+        FROM commits WHERE repo LIKE ? || '/%'
+    ''', (org_name,)).fetchone()
+
+    # Get languages across all repos
+    languages = conn.execute('''
+        SELECT language, SUM(bytes) as total_bytes FROM languages
+        WHERE repo LIKE ? || '/%' GROUP BY language ORDER BY total_bytes DESC LIMIT 10
+    ''', (org_name,)).fetchall()
+
+    # Get topics across all repos
+    topics = conn.execute('''
+        SELECT topic, COUNT(*) as count FROM topics
+        WHERE repo LIKE ? || '/%' GROUP BY topic ORDER BY count DESC LIMIT 20
+    ''', (org_name,)).fetchall()
+
+    # Monthly activity
+    monthly = conn.execute('''
+        SELECT strftime('%Y-%m', date) as month, COUNT(*) as commits
+        FROM commits WHERE repo LIKE ? || '/%' GROUP BY month ORDER BY month
+    ''', (org_name,)).fetchall()
+
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'org': org_name,
+        'stats': dict(total_stats) if total_stats else {},
+        'repos': [{'repo': r[0], 'commits': r[1], 'additions': r[2], 'deletions': r[3],
+                   'first_commit': r[4], 'last_commit': r[5]} for r in repos],
+        'languages': [{'language': r[0], 'bytes': r[1]} for r in languages],
+        'topics': [{'topic': r[0], 'count': r[1]} for r in topics],
+        'monthly': [{'month': r[0], 'commits': r[1]} for r in monthly],
+        'github_url': f'https://github.com/{org_name}'
+    })
 
 
 @app.route('/api/fetch/<username>')

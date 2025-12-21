@@ -1094,9 +1094,203 @@
             color: var(--foreground);
             border: 1px solid var(--border);
         }
+
+        /* Detail Modal */
+        .detail-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 1000;
+            overflow-y: auto;
+            padding: 2rem;
+        }
+        .detail-modal.active { display: block; }
+        .detail-modal-content {
+            max-width: 900px;
+            margin: 0 auto;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 2rem;
+        }
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 1rem;
+        }
+        .detail-title {
+            font-size: 1.75rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .detail-title a {
+            color: var(--foreground);
+            text-decoration: none;
+        }
+        .detail-title a:hover { color: var(--muted-foreground); }
+        .detail-close {
+            background: none;
+            border: none;
+            color: var(--muted-foreground);
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0.5rem;
+        }
+        .detail-close:hover { color: var(--foreground); }
+        .detail-meta {
+            color: var(--muted-foreground);
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+        }
+        .detail-description {
+            font-size: 1rem;
+            margin-bottom: 1.5rem;
+            line-height: 1.6;
+        }
+        .detail-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .detail-stat {
+            background: var(--secondary);
+            padding: 1rem;
+            border-radius: var(--radius);
+            text-align: center;
+        }
+        .detail-stat .value {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        .detail-stat .label {
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+            text-transform: uppercase;
+        }
+        .detail-actions {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-bottom: 1.5rem;
+        }
+        .detail-actions a {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--secondary);
+            color: var(--foreground);
+            text-decoration: none;
+            border-radius: var(--radius);
+            font-size: 0.875rem;
+            border: 1px solid var(--border);
+            transition: all 150ms;
+        }
+        .detail-actions a:hover {
+            background: var(--primary);
+            color: var(--primary-foreground);
+        }
+        .detail-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .detail-tag {
+            background: var(--secondary);
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+        }
+        .detail-section {
+            margin-bottom: 1.5rem;
+        }
+        .detail-section h3 {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 0.75rem;
+            color: var(--muted-foreground);
+        }
+        .detail-repos-list {
+            display: grid;
+            gap: 0.5rem;
+        }
+        .detail-repo-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            background: var(--secondary);
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: background 150ms;
+        }
+        .detail-repo-item:hover { background: var(--border); }
+        .detail-repo-name { font-weight: 500; }
+        .detail-repo-stats {
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+        }
+        .detail-chart { height: 200px; margin-bottom: 1rem; }
+        .detail-commits-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .detail-commit {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.875rem;
+        }
+        .detail-commit:last-child { border-bottom: none; }
+        .detail-commit-date {
+            color: var(--muted-foreground);
+            font-size: 0.75rem;
+        }
+
+        /* Clickable chart elements */
+        .clickable-chart { cursor: pointer; }
     </style>
 </head>
 <body>
+    <!-- Detail Modal -->
+    <div id="detailModal" class="detail-modal" onclick="if(event.target===this)closeDetailModal()">
+        <div class="detail-modal-content">
+            <div class="detail-header">
+                <div>
+                    <div class="detail-title" id="detailTitle"></div>
+                    <div class="detail-meta" id="detailMeta"></div>
+                </div>
+                <button class="detail-close" onclick="closeDetailModal()">×</button>
+            </div>
+            <div class="detail-description" id="detailDescription"></div>
+            <div class="detail-actions" id="detailActions"></div>
+            <div class="detail-stats-grid" id="detailStats"></div>
+            <div class="detail-tags" id="detailTags"></div>
+            <div class="detail-section" id="detailReposSection" style="display:none">
+                <h3>Repositories</h3>
+                <div class="detail-repos-list" id="detailReposList"></div>
+            </div>
+            <div class="detail-section">
+                <h3>Activity Over Time</h3>
+                <div class="detail-chart" id="detailActivityChart"></div>
+            </div>
+            <div class="detail-section" id="detailCommitsSection" style="display:none">
+                <h3>Recent Commits</h3>
+                <div class="detail-commits-list" id="detailCommitsList"></div>
+            </div>
+        </div>
+    </div>
     <div class="container">
         <!-- Profile Header - GitHub style -->
         <div id="profileHeader" class="profile-header" style="display:none">
@@ -1994,6 +2188,180 @@ ORDER BY date DESC LIMIT 20;`
             return sign + val.toFixed(1) + '%';
         }
 
+        // Detail Modal Functions
+        function closeDetailModal() {
+            document.getElementById('detailModal').classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        async function showRepoDetail(repoName) {
+            const modal = document.getElementById('detailModal');
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+
+            // Query local db for repo data
+            const repoData = db.exec(`
+                SELECT repo, COUNT(*) as commits, COALESCE(SUM(additions),0) as adds,
+                       COALESCE(SUM(deletions),0) as dels,
+                       MIN(date) as first_commit, MAX(date) as last_commit
+                FROM commits WHERE repo = '${repoName.replace(/'/g, "''")}'
+            `);
+
+            const stats = repoData.length > 0 ? repoData[0].values[0] : [];
+            const org = repoName.includes('/') ? repoName.split('/')[0] : null;
+            const name = repoName.includes('/') ? repoName.split('/')[1] : repoName;
+
+            // Get topics
+            const topicsData = db.exec(`SELECT topic FROM topics WHERE repo = '${repoName.replace(/'/g, "''")}'`);
+            const topics = topicsData.length > 0 ? topicsData[0].values.map(r => r[0]) : [];
+
+            // Get languages
+            const langData = db.exec(`SELECT language, bytes FROM languages WHERE repo = '${repoName.replace(/'/g, "''")}' ORDER BY bytes DESC LIMIT 5`);
+            const languages = langData.length > 0 ? langData[0].values : [];
+
+            // Render
+            document.getElementById('detailTitle').innerHTML = `
+                <a href="https://github.com/${repoName}" target="_blank">📦 ${name}</a>
+                ${org ? `<span style="color:var(--muted-foreground);font-size:0.875rem">by ${org}</span>` : ''}
+            `;
+            document.getElementById('detailMeta').textContent = stats[4] && stats[5]
+                ? `Active from ${stats[4]} to ${stats[5]}`
+                : '';
+            document.getElementById('detailDescription').textContent = languages.length
+                ? `Primary language: ${languages[0][0]}`
+                : '';
+
+            document.getElementById('detailActions').innerHTML = `
+                <a href="https://github.com/${repoName}" target="_blank">⭐ Star</a>
+                <a href="https://github.com/${repoName}/fork" target="_blank">🔀 Fork</a>
+                <a href="https://github.com/${repoName}" target="_blank">👁 View on GitHub</a>
+                <a href="https://github.com/${repoName}/issues" target="_blank">🐛 Issues</a>
+                ${org ? `<a href="#" onclick="event.preventDefault();showOrgDetail('${org}')">📁 ${org} org</a>` : ''}
+            `;
+
+            document.getElementById('detailStats').innerHTML = `
+                <div class="detail-stat"><div class="value">${formatNumber(stats[1])}</div><div class="label">Commits</div></div>
+                <div class="detail-stat"><div class="value">+${formatNumber(stats[2])}</div><div class="label">Lines Added</div></div>
+                <div class="detail-stat"><div class="value">-${formatNumber(stats[3])}</div><div class="label">Lines Deleted</div></div>
+                <div class="detail-stat"><div class="value">${formatNumber((stats[2]||0)-(stats[3]||0))}</div><div class="label">Net LOC</div></div>
+            `;
+
+            document.getElementById('detailTags').innerHTML = topics.map(t => `<span class="detail-tag">${t}</span>`).join('');
+
+            document.getElementById('detailReposSection').style.display = 'none';
+            document.getElementById('detailCommitsSection').style.display = 'block';
+
+            // Recent commits
+            const recentData = db.exec(`SELECT date, message FROM commits WHERE repo = '${repoName.replace(/'/g, "''")}' ORDER BY date DESC LIMIT 10`);
+            const recentCommits = recentData.length > 0 ? recentData[0].values : [];
+            document.getElementById('detailCommitsList').innerHTML = recentCommits.map(c =>
+                `<div class="detail-commit"><span class="detail-commit-date">${c[0]}</span> ${(c[1]||'').slice(0,80)}${(c[1]||'').length>80?'...':''}</div>`
+            ).join('');
+
+            // Activity chart
+            const monthlyData = db.exec(`
+                SELECT strftime('%Y-%m', date) as month, COUNT(*) as commits
+                FROM commits WHERE repo = '${repoName.replace(/'/g, "''")}' GROUP BY month ORDER BY month
+            `);
+            if (monthlyData.length > 0) {
+                const months = monthlyData[0].values.map(r => r[0]);
+                const commits = monthlyData[0].values.map(r => r[1]);
+                Plotly.newPlot('detailActivityChart', [{
+                    x: months, y: commits, type: 'bar',
+                    marker: { color: 'rgba(255,255,255,0.8)' }
+                }], {
+                    paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+                    font: { color: '#fff' }, margin: { l: 40, r: 20, t: 10, b: 40 },
+                    xaxis: { gridcolor: '#262626' }, yaxis: { gridcolor: '#262626' }
+                }, { displayModeBar: false });
+            }
+        }
+
+        async function showOrgDetail(orgName) {
+            const modal = document.getElementById('detailModal');
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+
+            // Query local db for org data
+            const orgData = db.exec(`
+                SELECT COUNT(*) as commits, COALESCE(SUM(additions),0) as adds,
+                       COALESCE(SUM(deletions),0) as dels,
+                       MIN(date) as first_commit, MAX(date) as last_commit,
+                       COUNT(DISTINCT repo) as repo_count
+                FROM commits WHERE repo LIKE '${orgName}/%'
+            `);
+            const stats = orgData.length > 0 ? orgData[0].values[0] : [];
+
+            // Get repos
+            const reposData = db.exec(`
+                SELECT repo, COUNT(*) as commits, COALESCE(SUM(additions),0) as adds
+                FROM commits WHERE repo LIKE '${orgName}/%'
+                GROUP BY repo ORDER BY commits DESC LIMIT 20
+            `);
+            const repos = reposData.length > 0 ? reposData[0].values : [];
+
+            // Get topics across all repos
+            const topicsData = db.exec(`SELECT topic, COUNT(*) as cnt FROM topics WHERE repo LIKE '${orgName}/%' GROUP BY topic ORDER BY cnt DESC LIMIT 15`);
+            const topics = topicsData.length > 0 ? topicsData[0].values.map(r => r[0]) : [];
+
+            // Render
+            document.getElementById('detailTitle').innerHTML = `
+                <a href="https://github.com/${orgName}" target="_blank">🏢 ${orgName}</a>
+            `;
+            document.getElementById('detailMeta').textContent = stats[3] && stats[4]
+                ? `Active from ${stats[3]} to ${stats[4]}`
+                : '';
+            document.getElementById('detailDescription').textContent = `Organization with ${stats[5] || 0} repositories`;
+
+            document.getElementById('detailActions').innerHTML = `
+                <a href="https://github.com/${orgName}" target="_blank">👁 View on GitHub</a>
+                <a href="https://github.com/orgs/${orgName}/people" target="_blank">👥 Members</a>
+                <a href="https://github.com/orgs/${orgName}/repositories" target="_blank">📦 All Repos</a>
+            `;
+
+            document.getElementById('detailStats').innerHTML = `
+                <div class="detail-stat"><div class="value">${formatNumber(stats[5])}</div><div class="label">Repos</div></div>
+                <div class="detail-stat"><div class="value">${formatNumber(stats[0])}</div><div class="label">Commits</div></div>
+                <div class="detail-stat"><div class="value">+${formatNumber(stats[1])}</div><div class="label">Lines Added</div></div>
+                <div class="detail-stat"><div class="value">${formatNumber((stats[1]||0)-(stats[2]||0))}</div><div class="label">Net LOC</div></div>
+            `;
+
+            document.getElementById('detailTags').innerHTML = topics.map(t => `<span class="detail-tag">${t}</span>`).join('');
+
+            document.getElementById('detailReposSection').style.display = 'block';
+            document.getElementById('detailCommitsSection').style.display = 'none';
+
+            document.getElementById('detailReposList').innerHTML = repos.map(r =>
+                `<div class="detail-repo-item" onclick="showRepoDetail('${r[0]}')">
+                    <span class="detail-repo-name">${r[0].split('/')[1]}</span>
+                    <span class="detail-repo-stats">${formatNumber(r[1])} commits, +${formatNumber(r[2])} LOC</span>
+                </div>`
+            ).join('');
+
+            // Activity chart
+            const monthlyData = db.exec(`
+                SELECT strftime('%Y-%m', date) as month, COUNT(*) as commits
+                FROM commits WHERE repo LIKE '${orgName}/%' GROUP BY month ORDER BY month
+            `);
+            if (monthlyData.length > 0) {
+                const months = monthlyData[0].values.map(r => r[0]);
+                const commits = monthlyData[0].values.map(r => r[1]);
+                Plotly.newPlot('detailActivityChart', [{
+                    x: months, y: commits, type: 'bar',
+                    marker: { color: 'rgba(255,255,255,0.8)' }
+                }], {
+                    paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+                    font: { color: '#fff' }, margin: { l: 40, r: 20, t: 10, b: 40 },
+                    xaxis: { gridcolor: '#262626' }, yaxis: { gridcolor: '#262626' }
+                }, { displayModeBar: false });
+            }
+        }
+
+        // Escape key to close modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeDetailModal();
+        });
+
         function displaySummary(userData) {
             const stats = userData.stats || {};
             const container = document.getElementById('summaryRow');
@@ -2267,12 +2635,20 @@ ORDER BY date DESC LIMIT 20;`
                 `);
                 if (repoData.length > 0) {
                     const rows = repoData[0].values;
-                    const repos = rows.map(r => (r[0] || '').split('/').pop().slice(0, 20));
+                    const fullRepos = rows.map(r => r[0] || '');
+                    const repos = fullRepos.map(r => r.split('/').pop().slice(0, 20));
                     const commits = rows.map(r => r[1]);
                     Plotly.newPlot('topReposChart', [{
                         x: commits, y: repos, type: 'bar', orientation: 'h',
-                        marker: { color: '#fff' }, text: commits, textposition: 'auto'
+                        marker: { color: '#fff' }, text: commits, textposition: 'auto',
+                        customdata: fullRepos,
+                        hovertemplate: '%{customdata}<br>%{x} commits<extra></extra>'
                     }], { ...darkLayout, xaxis: { ...darkLayout.xaxis, type: 'linear' }, yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
+                    // Click handler
+                    document.getElementById('topReposChart').on('plotly_click', (data) => {
+                        const repo = data.points[0].customdata;
+                        if (repo) showRepoDetail(repo);
+                    });
                 }
             } catch (e) { console.error('Top repos error:', e); }
 
@@ -2288,13 +2664,19 @@ ORDER BY date DESC LIMIT 20;`
                 `);
                 if (locRepoData.length > 0) {
                     const rows = locRepoData[0].values;
-                    const repos = rows.map(r => (r[0] || '').split('/').pop().slice(0, 20));
+                    const fullRepos = rows.map(r => r[0] || '');
+                    const repos = fullRepos.map(r => r.split('/').pop().slice(0, 20));
                     const added = rows.map(r => r[1] || 0);
                     const deleted = rows.map(r => -(r[2] || 0));
                     Plotly.newPlot('topReposLocChart', [
-                        { x: added, y: repos, type: 'bar', orientation: 'h', name: 'Added', marker: { color: 'rgba(255,255,255,0.8)' } },
-                        { x: deleted, y: repos, type: 'bar', orientation: 'h', name: 'Deleted', marker: { color: 'rgba(255,255,255,0.3)' } }
+                        { x: added, y: repos, type: 'bar', orientation: 'h', name: 'Added', marker: { color: 'rgba(255,255,255,0.8)' }, customdata: fullRepos },
+                        { x: deleted, y: repos, type: 'bar', orientation: 'h', name: 'Deleted', marker: { color: 'rgba(255,255,255,0.3)' }, customdata: fullRepos }
                     ], { ...darkLayout, barmode: 'relative', xaxis: { type: 'linear' }, yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
+                    // Click handler
+                    document.getElementById('topReposLocChart').on('plotly_click', (data) => {
+                        const repo = data.points[0].customdata;
+                        if (repo) showRepoDetail(repo);
+                    });
                 }
             } catch (e) { console.error('Top repos LOC error:', e); }
 
@@ -2602,13 +2984,19 @@ ORDER BY date DESC LIMIT 20;`
                         x: commits, y: orgs, type: 'bar', orientation: 'h',
                         marker: { color: 'rgba(255,255,255,0.7)' },
                         text: commits.map(c => c.toLocaleString()),
-                        textposition: 'auto'
+                        textposition: 'auto',
+                        customdata: orgs
                     }], {
                         ...darkLayout,
                         xaxis: { ...darkLayout.xaxis, title: 'Commits', type: 'linear' },
                         yaxis: { type: 'category', autorange: 'reversed' },
                         margin: { l: 100, r: 20, t: 20, b: 40 }
                     }, plotConfig);
+                    // Click handler for org chart
+                    document.getElementById('topOrgsChart').on('plotly_click', (data) => {
+                        const org = data.points[0].customdata;
+                        if (org) showOrgDetail(org);
+                    });
 
                     // Sort by net LOC for LOC chart
                     const locSorted = orgs.map((org, i) => ({ org, net: netLoc[i], adds: additions[i], dels: deletions[i] }))
@@ -2619,13 +3007,19 @@ ORDER BY date DESC LIMIT 20;`
                         type: 'bar', orientation: 'h',
                         marker: { color: locSorted.map(r => r.net >= 0 ? 'rgba(255,255,255,0.7)' : 'rgba(255,100,100,0.7)') },
                         text: locSorted.map(r => (r.net >= 0 ? '+' : '') + formatNumber(r.net)),
-                        textposition: 'auto'
+                        textposition: 'auto',
+                        customdata: locSorted.map(r => r.org)
                     }], {
                         ...darkLayout,
                         xaxis: { ...darkLayout.xaxis, title: 'Net Lines of Code', type: 'linear' },
                         yaxis: { type: 'category', autorange: 'reversed' },
                         margin: { l: 100, r: 20, t: 20, b: 40 }
                     }, plotConfig);
+                    // Click handler for org LOC chart
+                    document.getElementById('topOrgsLocChart').on('plotly_click', (data) => {
+                        const org = data.points[0].customdata;
+                        if (org) showOrgDetail(org);
+                    });
                 }
             } catch (e) { console.error('Top orgs error:', e); }
 
@@ -2825,13 +3219,15 @@ ORDER BY date DESC LIMIT 20;`
                 `);
                 if (lifetimeData.length > 0) {
                     const rows = lifetimeData[0].values;
-                    const repos = rows.map(r => (r[0] || '').split('/').pop().slice(0, 18));
+                    const fullRepos = rows.map(r => r[0] || '');
+                    const repos = fullRepos.map(r => r.split('/').pop().slice(0, 18));
                     // Create timeline bars with commit count info
                     const traces = rows.map((r, i) => ({
                         x: [r[1], r[2]], y: [repos[i], repos[i]], mode: 'lines+markers',
                         line: { color: '#fff', width: 6 }, marker: { size: 6, color: '#fff' },
                         name: repos[i], showlegend: false,
-                        hovertemplate: `<b>${repos[i]}</b><br>Started: ${r[1]}<br>Last: ${r[2]}<br>Commits: ${r[3]}<extra></extra>`
+                        customdata: [fullRepos[i], fullRepos[i]],
+                        hovertemplate: `<b>${fullRepos[i]}</b><br>Started: ${r[1]}<br>Last: ${r[2]}<br>Commits: ${r[3]}<extra></extra>`
                     }));
                     // Make the chart taller for scrolling effect
                     const chartHeight = Math.max(400, rows.length * 18);
@@ -2843,6 +3239,11 @@ ORDER BY date DESC LIMIT 20;`
                         margin: { l: 130, r: 20, t: 20, b: 40 },
                         hovermode: 'closest'
                     }, plotConfig);
+                    // Click handler
+                    document.getElementById('repoLifetimeChart').on('plotly_click', (data) => {
+                        const repo = data.points[0].customdata;
+                        if (repo) showRepoDetail(repo);
+                    });
                 }
             } catch (e) { console.error('Repo lifetime error:', e); }
 
@@ -2869,7 +3270,8 @@ ORDER BY date DESC LIMIT 20;`
                 `);
                 if (churnData.length > 0) {
                     const rows = churnData[0].values;
-                    const repos = rows.map(r => (r[0] || '').split('/').pop().slice(0, 20));
+                    const fullRepos = rows.map(r => r[0] || '');
+                    const repos = fullRepos.map(r => r.split('/').pop().slice(0, 20));
                     const commits = rows.map(r => r[1] || 0);
                     const added = rows.map(r => r[2] || 0);
                     const deleted = rows.map(r => r[3] || 0);
@@ -2879,8 +3281,13 @@ ORDER BY date DESC LIMIT 20;`
                           marker: { color: 'rgba(255,255,255,0.9)' },
                           text: rows.map(r => `${r[1]} commits, ${Math.round((r[2]+r[3])/1000)}k LOC`),
                           textposition: 'outside', hovertemplate: '%{y}<br>Commits: %{x}<br>+%{customdata[0]:,} / -%{customdata[1]:,}<extra></extra>',
-                          customdata: rows.map(r => [r[2], r[3]]) }
+                          customdata: rows.map((r, i) => [r[2], r[3], fullRepos[i]]) }
                     ], { ...darkLayout, xaxis: { title: 'Commits (with LOC weight)' }, yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 120, r: 100, t: 20, b: 40 } }, plotConfig);
+                    // Click handler
+                    document.getElementById('codeChurnChart').on('plotly_click', (data) => {
+                        const repo = data.points[0].customdata[2];
+                        if (repo) showRepoDetail(repo);
+                    });
                 }
             } catch (e) { console.error('Code churn error:', e); }
 
