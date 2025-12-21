@@ -2134,12 +2134,13 @@ ORDER BY date DESC LIMIT 20;`
                 { id: 'commitsTimelineChart', title: 'Commits Over Time', key: 'commits_timeline' },
                 { id: 'locTimelineChart', title: 'Lines of Code Over Time', key: 'loc_timeline' },
                 { id: 'cumulativeLocChart', title: 'Cumulative Lines of Code', key: 'cumulative_loc' },
-                { id: 'commitVelocityChart', title: 'Commit Velocity (Weekly)', key: 'commit_velocity' },
                 { id: 'orgTimelineChart', title: 'Organization Activity Over Time', key: 'org_timeline' },
+                { id: 'topOrgsChart', title: 'Top Organizations (by Commits)', key: 'top_orgs' },
+                { id: 'topOrgsLocChart', title: 'Top Organizations (by LOC)', key: 'top_orgs_loc' },
+                { id: 'commitVelocityChart', title: 'Commit Velocity (Weekly)', key: 'commit_velocity' },
                 { id: 'langEvolutionChart', title: 'Language Evolution', key: 'lang_evolution' },
                 { id: 'focusChart', title: 'Projects Per Day (Focus Index)', key: 'focus' },
                 { id: 'categoryChart', title: 'Project Categories (AI vs Blockchain vs Web)', key: 'categories' },
-                { id: 'topOrgsChart', title: 'Top Organizations', key: 'top_orgs' },
                 { id: 'commitSizeChart', title: 'Commit Size Distribution', key: 'commit_size' },
                 { id: 'languagesChart', title: 'Languages', key: 'languages' },
                 { id: 'topReposChart', title: 'Top Repositories (by Commits)', key: 'top_repos' },
@@ -2591,6 +2592,11 @@ ORDER BY date DESC LIMIT 20;`
                     const rows = orgData[0].values;
                     const orgs = rows.map(r => r[0]);
                     const commits = rows.map(r => r[1]);
+                    const additions = rows.map(r => r[2]);
+                    const deletions = rows.map(r => r[3]);
+                    const netLoc = rows.map((r, i) => additions[i] - deletions[i]);
+
+                    // Sort by commits for commits chart
                     Plotly.newPlot('topOrgsChart', [{
                         x: commits, y: orgs, type: 'bar', orientation: 'h',
                         marker: { color: 'rgba(255,255,255,0.7)' },
@@ -2599,6 +2605,23 @@ ORDER BY date DESC LIMIT 20;`
                     }], {
                         ...darkLayout,
                         xaxis: { ...darkLayout.xaxis, title: 'Commits', type: 'linear' },
+                        yaxis: { type: 'category', autorange: 'reversed' },
+                        margin: { l: 100, r: 20, t: 20, b: 40 }
+                    }, plotConfig);
+
+                    // Sort by net LOC for LOC chart
+                    const locSorted = orgs.map((org, i) => ({ org, net: netLoc[i], adds: additions[i], dels: deletions[i] }))
+                        .sort((a, b) => b.net - a.net);
+                    Plotly.newPlot('topOrgsLocChart', [{
+                        x: locSorted.map(r => r.net),
+                        y: locSorted.map(r => r.org),
+                        type: 'bar', orientation: 'h',
+                        marker: { color: locSorted.map(r => r.net >= 0 ? 'rgba(255,255,255,0.7)' : 'rgba(255,100,100,0.7)') },
+                        text: locSorted.map(r => (r.net >= 0 ? '+' : '') + formatNumber(r.net)),
+                        textposition: 'auto'
+                    }], {
+                        ...darkLayout,
+                        xaxis: { ...darkLayout.xaxis, title: 'Net Lines of Code', type: 'linear' },
                         yaxis: { type: 'category', autorange: 'reversed' },
                         margin: { l: 100, r: 20, t: 20, b: 40 }
                     }, plotConfig);
