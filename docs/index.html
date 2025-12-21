@@ -2142,7 +2142,7 @@ ORDER BY date DESC LIMIT 20;`
                 { id: 'commitVelocityChart', title: 'Commit Velocity (Weekly)', key: 'commit_velocity' },
                 { id: 'langEvolutionChart', title: 'Language Evolution', key: 'lang_evolution' },
                 { id: 'focusChart', title: 'Projects Per Day (Focus Index)', key: 'focus' },
-                { id: 'categoryChart', title: 'Project Categories (AI vs Blockchain vs Web)', key: 'categories' },
+                { id: 'categoryChart', title: 'Project Categories', key: 'categories' },
                 { id: 'commitSizeChart', title: 'Commit Size Distribution', key: 'commit_size' },
                 { id: 'languagesChart', title: 'Languages', key: 'languages' },
                 { id: 'topicsCloudChart', title: 'Topic Tags', key: 'topics_cloud' },
@@ -2159,7 +2159,7 @@ ORDER BY date DESC LIMIT 20;`
             ];
 
             // Create chart grid for some charts
-            const fullWidthCharts = ['commits_timeline', 'loc_timeline', 'cumulative_loc', 'commit_velocity', 'org_timeline', 'lang_evolution', 'focus', 'heatmap', 'last_30d'];
+            const fullWidthCharts = ['commits_timeline', 'loc_timeline', 'cumulative_loc', 'commit_velocity', 'org_timeline', 'lang_evolution', 'focus', 'heatmap', 'last_30d', 'repo_lifetime'];
             const gridCharts = charts.filter(c => !fullWidthCharts.includes(c.key));
             const wideCharts = charts.filter(c => fullWidthCharts.includes(c.key));
 
@@ -2631,44 +2631,70 @@ ORDER BY date DESC LIMIT 20;`
                 }
             } catch (e) { console.error('Top orgs error:', e); }
 
-            // Project Categories (AI vs Blockchain vs Web)
+            // Project Categories (expanded with crypto, privacy, quantum)
             try {
-                // Categorize organizations
-                const catMapping = {
+                // Categorize by org AND repo patterns for better accuracy
+                const orgMapping = {
                     'hanzoai': 'AI', 'hanzo-ai': 'AI', 'zooai': 'AI', 'zoo-labs': 'AI', 'zenlm': 'AI',
                     'luxfi': 'Blockchain', 'lux-network': 'Blockchain', 'verus-io': 'Blockchain', 'dmagic': 'Blockchain',
-                    'sakejs': 'Web', 'shopjs': 'Web', 'crowdstart': 'Web', 'shortcake': 'Web'
+                    'sakejs': 'Web', 'shopjs': 'Web', 'crowdstart': 'Web', 'shortcake': 'Web', 'hanzo-js': 'Web',
+                    'secretpool': 'Privacy'
                 };
+                // Repo-specific overrides (more specific than org)
+                const repoPatterns = [
+                    { pattern: /crypto|cryptography|encryption/i, category: 'Cryptography' },
+                    { pattern: /threshold/i, category: 'Threshold Crypto' },
+                    { pattern: /mpc|multiparty/i, category: 'MPC' },
+                    { pattern: /iam|identity|auth/i, category: 'IAM/Identity' },
+                    { pattern: /zkp|zk-|zero-knowledge|snark|stark/i, category: 'ZKP' },
+                    { pattern: /fhe|homomorphic/i, category: 'FHE' },
+                    { pattern: /privacy|private|secret/i, category: 'Privacy' },
+                    { pattern: /quantum|post-quantum|pqc|lattice/i, category: 'Quantum' },
+                    { pattern: /llm|gpt|transformer|neural|model/i, category: 'AI' },
+                    { pattern: /blockchain|chain|consensus|validator/i, category: 'Blockchain' }
+                ];
                 const catData = db.exec(`
-                    SELECT
-                        CASE
-                            WHEN repo LIKE '%/%' THEN LOWER(SUBSTR(repo, 1, INSTR(repo, '/') - 1))
-                            ELSE 'unknown'
-                        END as org,
-                        COUNT(*) as commits
+                    SELECT repo, COUNT(*) as commits
                     FROM commits
                     WHERE repo IS NOT NULL AND repo != '' ${userFilterAnd}
-                    GROUP BY org
+                    GROUP BY repo
                 `);
                 if (catData.length > 0) {
-                    const categories = { 'AI': 0, 'Blockchain': 0, 'Web': 0, 'Personal/Other': 0 };
+                    const categories = {};
+                    const categoryColors = {
+                        'AI': '#8b5cf6', 'Blockchain': '#f59e0b', 'Web': '#10b981',
+                        'Cryptography': '#06b6d4', 'Threshold Crypto': '#0ea5e9', 'MPC': '#3b82f6',
+                        'IAM/Identity': '#ec4899', 'ZKP': '#f43f5e', 'FHE': '#a855f7',
+                        'Privacy': '#14b8a6', 'Quantum': '#6366f1', 'Other': '#6b7280'
+                    };
                     catData[0].values.forEach(row => {
-                        const org = row[0];
+                        const repo = row[0] || '';
                         const commits = row[1];
-                        const cat = catMapping[org] || 'Personal/Other';
-                        categories[cat] += commits;
+                        const org = repo.includes('/') ? repo.split('/')[0].toLowerCase() : '';
+                        const repoName = repo.includes('/') ? repo.split('/')[1] : repo;
+
+                        // Check repo-specific patterns first (more specific)
+                        let cat = null;
+                        for (const { pattern, category } of repoPatterns) {
+                            if (pattern.test(repoName)) {
+                                cat = category;
+                                break;
+                            }
+                        }
+                        // Fall back to org mapping
+                        if (!cat) cat = orgMapping[org] || 'Other';
+
+                        categories[cat] = (categories[cat] || 0) + commits;
                     });
-                    const labels = Object.keys(categories).filter(k => categories[k] > 0);
-                    const values = labels.map(k => categories[k]);
+                    // Sort by value and filter
+                    const sorted = Object.entries(categories)
+                        .filter(([k, v]) => v > 0)
+                        .sort((a, b) => b[1] - a[1]);
+                    const labels = sorted.map(e => e[0]);
+                    const values = sorted.map(e => e[1]);
                     Plotly.newPlot('categoryChart', [{
                         labels: labels, values: values, type: 'pie',
-                        marker: {
-                            colors: labels.map(l =>
-                                l === 'AI' ? '#8b5cf6' :
-                                l === 'Blockchain' ? '#f59e0b' :
-                                l === 'Web' ? '#10b981' : '#6b7280'
-                            )
-                        },
+                        marker: { colors: labels.map(l => categoryColors[l] || '#6b7280') },
                         textinfo: 'label+percent',
                         textfont: { color: '#fff' },
                         hoverinfo: 'label+value+percent'
@@ -2787,29 +2813,36 @@ ORDER BY date DESC LIMIT 20;`
                 }
             } catch (e) { console.error('Staleness error:', e); }
 
-            // Repository Lifetime
+            // Repository Lifetime (showing most active projects, scrollable)
             try {
                 const lifetimeData = db.exec(`
-                    SELECT repo, MIN(date) as first_commit, MAX(date) as last_commit, COUNT(*) as commits
+                    SELECT repo, MIN(date) as first_commit, MAX(date) as last_commit, COUNT(*) as commits,
+                           julianday(MAX(date)) - julianday(MIN(date)) as lifetime_days
                     FROM commits
                     WHERE repo IS NOT NULL AND repo != '' ${userFilterAnd}
                     GROUP BY repo
-                    ORDER BY first_commit
-                    LIMIT 20
+                    HAVING COUNT(*) >= 5
+                    ORDER BY last_commit DESC, commits DESC
+                    LIMIT 40
                 `);
                 if (lifetimeData.length > 0) {
                     const rows = lifetimeData[0].values;
-                    const repos = rows.map(r => (r[0] || '').split('/').pop().slice(0, 15));
-                    const firstDates = rows.map(r => r[1]);
-                    const lastDates = rows.map(r => r[2]);
-                    // Create timeline bars
+                    const repos = rows.map(r => (r[0] || '').split('/').pop().slice(0, 18));
+                    // Create timeline bars with commit count info
                     const traces = rows.map((r, i) => ({
                         x: [r[1], r[2]], y: [repos[i], repos[i]], mode: 'lines+markers',
-                        line: { color: '#fff', width: 8 }, marker: { size: 8, color: '#fff' },
-                        name: repos[i], showlegend: false, hoverinfo: 'x+name'
+                        line: { color: '#fff', width: 6 }, marker: { size: 6, color: '#fff' },
+                        name: repos[i], showlegend: false,
+                        hovertemplate: `<b>${repos[i]}</b><br>Started: ${r[1]}<br>Last: ${r[2]}<br>Commits: ${r[3]}<extra></extra>`
                     }));
+                    // Make the chart taller for scrolling effect
+                    const chartHeight = Math.max(400, rows.length * 18);
                     Plotly.newPlot('repoLifetimeChart', traces, {
-                        ...darkLayout, xaxis: { ...darkLayout.xaxis, type: 'date', tickformat: '%b %d, %Y' }, yaxis: { type: 'category' }, margin: { l: 100, r: 20, t: 20, b: 40 },
+                        ...darkLayout,
+                        height: chartHeight,
+                        xaxis: { ...darkLayout.xaxis, type: 'date', tickformat: '%Y' },
+                        yaxis: { type: 'category', autorange: 'reversed' },
+                        margin: { l: 130, r: 20, t: 20, b: 40 },
                         hovermode: 'closest'
                     }, plotConfig);
                 }
