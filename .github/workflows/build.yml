@@ -1,0 +1,113 @@
+name: Build and Deploy Stats
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Run daily at 6am UTC to refresh data
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      fetch_loc:
+        description: 'Fetch LOC data (slow)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GH_STATS_TOKEN }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Fetch GitHub data
+        run: |
+          # Run the app briefly to trigger data fetch
+          timeout 300 uv run python app.py --fetch-loc || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_STATS_TOKEN }}
+        if: ${{ github.event.inputs.fetch_loc == 'true' || github.event_name == 'schedule' }}
+
+      - name: Export static site
+        run: |
+          uv run python app.py --export docs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_STATS_TOKEN }}
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'schedule' || github.event.inputs.fetch_loc == 'true'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: artifact
+
+      - name: Extract artifact
+        run: |
+          cd artifact
+          tar -xvf artifact.tar
+          ls -la
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: data-${{ github.run_number }}
+          name: Stats Data ${{ github.run_number }}
+          body: |
+            Auto-generated stats data release.
+
+            - `stats.db` - SQLite database with commit data
+            - `data.json` - JSON data for the dashboard
+          files: |
+            artifact/stats.db
+            artifact/data.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1877,7 +1877,13 @@ def export_static_site(output_dir: Path):
     # Write files
     (output_dir / 'index.html').write_text(html)
     (output_dir / 'data.json').write_text(json.dumps(static_data, default=str, indent=2))
-    
+
+    # Copy database file for sql.js client-side queries
+    import shutil
+    if DB_PATH.exists():
+        shutil.copy(DB_PATH, output_dir / 'stats.db')
+        print(f'  Created {output_dir}/stats.db')
+
     print(f'  Created {output_dir}/index.html')
     print(f'  Created {output_dir}/data.json')
     print(f'\nPreview: python -m http.server -d {output_dir} 8000')
