@@ -166,6 +166,21 @@ class StatsDB:
             CREATE INDEX IF NOT EXISTS idx_repos_username ON repos(username);
         ''')
         conn.commit()
+
+        # Migrations: Add missing columns to existing tables
+        migrations = [
+            ('repos', 'fetched_at', 'TEXT'),
+            ('commits', 'fetched_at', 'TEXT'),
+            ('languages', 'fetched_at', 'TEXT'),
+            ('topics', 'fetched_at', 'TEXT'),
+        ]
+        for table, column, col_type in migrations:
+            try:
+                conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {col_type}')
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
         conn.close()
     
     def save_user(self, user_data: dict):
