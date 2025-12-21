@@ -133,6 +133,15 @@ class StatsDB:
                 PRIMARY KEY (repo, language)
             );
 
+            -- Topics/tags per repo
+            CREATE TABLE IF NOT EXISTS topics (
+                repo TEXT NOT NULL,
+                username TEXT NOT NULL,
+                topic TEXT NOT NULL,
+                fetched_at TEXT,
+                PRIMARY KEY (repo, topic)
+            );
+
             -- Indexes for fast queries
             CREATE INDEX IF NOT EXISTS idx_commits_user_date ON commits(username, date);
             CREATE INDEX IF NOT EXISTS idx_commits_repo ON commits(repo);
@@ -787,6 +796,59 @@ class GitHubStatsAnalyzer:
                 time.sleep(REQUEST_DELAY)
             except Exception as e:
                 print(f'    Error fetching languages for {repo}: {e}')
+
+        return fetched
+
+    def fetch_topics(self, username: str, limit: int = None) -> int:
+        """Fetch topics/tags for repos of a user."""
+        conn = self.db._get_conn()
+        # Get repos ordered by commit count, optionally limited
+        query = '''
+            SELECT repo, COUNT(*) as commits FROM commits
+            WHERE username = ? AND repo IS NOT NULL AND repo != ''
+            GROUP BY repo ORDER BY commits DESC
+        '''
+        if limit:
+            query += f' LIMIT {limit}'
+        repos = conn.execute(query, (username,)).fetchall()
+        conn.close()
+
+        fetched = 0
+        for row in repos:
+            repo = row[0]
+            # Check if already fetched
+            conn = self.db._get_conn()
+            existing = conn.execute('SELECT 1 FROM topics WHERE repo = ?', (repo,)).fetchone()
+            conn.close()
+            if existing:
+                continue
+
+            # Fetch from GitHub (need to accept topics preview header)
+            try:
+                resp = requests.get(
+                    f'https://api.github.com/repos/{repo}',
+                    headers={**REST_HEADERS, 'Accept': 'application/vnd.github.mercy-preview+json'}
+                )
+                if resp.status_code == 200:
+                    repo_data = resp.json()
+                    topics = repo_data.get('topics', [])
+                    if topics:
+                        conn = self.db._get_conn()
+                        for topic in topics:
+                            conn.execute('''
+                                INSERT OR REPLACE INTO topics (repo, username, topic, fetched_at)
+                                VALUES (?, ?, ?, ?)
+                            ''', (repo, username, topic, datetime.now().isoformat()))
+                        conn.commit()
+                        conn.close()
+                    fetched += 1
+
+                    if fetched % 20 == 0:
+                        print(f'    Fetched topics for {fetched} repos')
+
+                time.sleep(REQUEST_DELAY)
+            except Exception as e:
+                print(f'    Error fetching topics for {repo}: {e}')
 
         return fetched
 

@@ -2143,10 +2143,11 @@ ORDER BY date DESC LIMIT 20;`
                 { id: 'categoryChart', title: 'Project Categories (AI vs Blockchain vs Web)', key: 'categories' },
                 { id: 'commitSizeChart', title: 'Commit Size Distribution', key: 'commit_size' },
                 { id: 'languagesChart', title: 'Languages', key: 'languages' },
+                { id: 'topicsCloudChart', title: 'Topic Tags', key: 'topics_cloud' },
                 { id: 'topReposChart', title: 'Top Repositories (by Commits)', key: 'top_repos' },
                 { id: 'topReposLocChart', title: 'Top Repositories (by LOC)', key: 'top_repos_loc' },
                 { id: 'repoLifetimeChart', title: 'Repository Lifetime', key: 'repo_lifetime' },
-                { id: 'codeChurnChart', title: 'Code Churn (High Activity Repos)', key: 'code_churn' },
+                { id: 'codeChurnChart', title: 'Most Active Repos (Commits + LOC)', key: 'code_churn' },
                 { id: 'heatmapChart', title: 'Monthly Activity Heatmap', key: 'heatmap' },
                 { id: 'yearlyCommitsChart', title: 'Yearly Commits', key: 'yearly_commits' },
                 { id: 'dayOfWeekChart', title: 'Activity by Day of Week', key: 'day_of_week' },
@@ -2812,26 +2813,41 @@ ORDER BY date DESC LIMIT 20;`
                 }
             } catch (e) { console.error('Repo lifetime error:', e); }
 
-            // Code Churn (repos with high additions + deletions)
+            // Code Churn (repos with sustained high activity - balanced commits + LOC)
+            // Uses activity_score = commits * (1 + log10(avg_churn_per_commit + 1))
+            // This prevents single massive vendored commits from dominating
             try {
                 const churnData = db.exec(`
-                    SELECT repo, SUM(additions) as added, SUM(deletions) as deleted,
-                           SUM(additions) + SUM(deletions) as churn
+                    SELECT repo,
+                           COUNT(*) as commit_count,
+                           SUM(additions) as added,
+                           SUM(deletions) as deleted,
+                           SUM(additions) + SUM(deletions) as total_churn,
+                           CAST(COUNT(*) AS REAL) * (1 + LOG10(
+                               CAST((SUM(additions) + SUM(deletions)) AS REAL) / MAX(COUNT(*), 1) + 1
+                           )) as activity_score
                     FROM commits
                     WHERE repo IS NOT NULL AND repo != '' ${userFilterAnd}
+                      AND additions IS NOT NULL
                     GROUP BY repo
-                    ORDER BY churn DESC
+                    HAVING COUNT(*) >= 5
+                    ORDER BY activity_score DESC
                     LIMIT 10
                 `);
                 if (churnData.length > 0) {
                     const rows = churnData[0].values;
                     const repos = rows.map(r => (r[0] || '').split('/').pop().slice(0, 20));
-                    const added = rows.map(r => r[1] || 0);
-                    const deleted = rows.map(r => r[2] || 0);
+                    const commits = rows.map(r => r[1] || 0);
+                    const added = rows.map(r => r[2] || 0);
+                    const deleted = rows.map(r => r[3] || 0);
+                    // Show commits as main bar, with churn as secondary info
                     Plotly.newPlot('codeChurnChart', [
-                        { x: added, y: repos, type: 'bar', orientation: 'h', name: 'Added', marker: { color: 'rgba(255,255,255,0.8)' } },
-                        { x: deleted, y: repos, type: 'bar', orientation: 'h', name: 'Deleted', marker: { color: 'rgba(255,255,255,0.3)' } }
-                    ], { ...darkLayout, barmode: 'stack', xaxis: { type: 'linear', title: 'Total Churn (LOC)' }, yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 120, r: 20, t: 20, b: 40 } }, plotConfig);
+                        { x: commits, y: repos, type: 'bar', orientation: 'h', name: 'Commits',
+                          marker: { color: 'rgba(255,255,255,0.9)' },
+                          text: rows.map(r => `${r[1]} commits, ${Math.round((r[2]+r[3])/1000)}k LOC`),
+                          textposition: 'outside', hovertemplate: '%{y}<br>Commits: %{x}<br>+%{customdata[0]:,} / -%{customdata[1]:,}<extra></extra>',
+                          customdata: rows.map(r => [r[2], r[3]]) }
+                    ], { ...darkLayout, xaxis: { title: 'Commits (with LOC weight)' }, yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 120, r: 100, t: 20, b: 40 } }, plotConfig);
                 }
             } catch (e) { console.error('Code churn error:', e); }
 
@@ -2856,6 +2872,45 @@ ORDER BY date DESC LIMIT 20;`
                     }], { ...darkLayout, showlegend: false, margin: { l: 20, r: 20, t: 20, b: 20 } }, plotConfig);
                 }
             } catch (e) { console.error('Languages error:', e); }
+
+            // Topics Tag Cloud (word cloud style using treemap)
+            try {
+                const topicsData = db.exec(`
+                    SELECT t.topic, COUNT(DISTINCT t.repo) as repo_count,
+                           (SELECT COUNT(*) FROM commits c WHERE c.repo IN (SELECT repo FROM topics WHERE topic = t.topic)) as total_commits
+                    FROM topics t
+                    ${isAll ? '' : `WHERE t.username = '${username}'`}
+                    GROUP BY t.topic
+                    ORDER BY repo_count DESC
+                    LIMIT 30
+                `);
+                if (topicsData.length > 0) {
+                    const rows = topicsData[0].values;
+                    const topics = rows.map(r => r[0]);
+                    const repoCounts = rows.map(r => r[1] || 0);
+                    const commitCounts = rows.map(r => r[2] || 0);
+                    // Use treemap for tag cloud effect
+                    Plotly.newPlot('topicsCloudChart', [{
+                        type: 'treemap',
+                        labels: topics,
+                        parents: topics.map(() => ''),
+                        values: repoCounts,
+                        text: topics.map((t, i) => `${t}<br>${repoCounts[i]} repos`),
+                        textinfo: 'label',
+                        hovertemplate: '%{label}<br>Repos: %{value}<br>Commits: %{customdata}<extra></extra>',
+                        customdata: commitCounts,
+                        marker: {
+                            colors: repoCounts,
+                            colorscale: [[0, '#262626'], [0.5, '#666'], [1, '#fff']],
+                            line: { width: 1, color: '#000' }
+                        },
+                        textfont: { color: '#000', size: 14 }
+                    }], {
+                        ...darkLayout,
+                        margin: { l: 10, r: 10, t: 10, b: 10 }
+                    }, plotConfig);
+                }
+            } catch (e) { console.error('Topics cloud error:', e); }
         }
 
         async function fetchNewUser() {
