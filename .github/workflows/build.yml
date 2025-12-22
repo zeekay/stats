@@ -42,6 +42,22 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Restore previous database
+        run: |
+          mkdir -p cache
+          # Try to download from latest release first
+          if gh release download --pattern 'stats.db' --dir cache 2>/dev/null; then
+            echo "Restored database from latest release"
+          # Fall back to GitHub Pages
+          elif curl -fsSL -o cache/stats.db "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/stats.db" 2>/dev/null; then
+            echo "Restored database from GitHub Pages"
+          else
+            echo "No previous database found, starting fresh"
+          fi
+          ls -la cache/ || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Fetch GitHub data
         run: |
           # Run the app briefly to trigger data fetch
